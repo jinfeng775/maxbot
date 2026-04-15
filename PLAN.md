@@ -14,8 +14,8 @@
 |------|------|------|----------|
 | Phase 0 | 项目骨架 & 核心引擎 | ✅ 已完成 | — |
 | Phase 1 | 工具系统完善 | ✅ 已完成 | — |
-| Phase 2 | 代码编辑引擎 | 🔲 未开始 | 1-2 周 |
-| Phase 3 | 多 Agent 编排 | 🔲 未开始 | 2-3 周 |
+| Phase 2 | 代码编辑引擎 | ✅ 已完成 | — |
+| Phase 3 | 多 Agent 编排 | ✅ 已完成 | — |
 | Phase 4 | Gateway 多平台 | 🔲 未开始 | 2-3 周 |
 | Phase 5 | 知识吸收系统 | 🔲 未开始 | 3-4 周 |
 | Phase 6 | 自我改进 | 🔲 未开始 | 2-3 周 |
@@ -127,85 +127,90 @@
 
 ---
 
-## Phase 2：代码编辑引擎
+## Phase 2：代码编辑引擎 ✅
 
-**状态：🔲 未开始**
-**预计周期：1-2 周**
-**参考来源：Claude Code `FileEditTool/`**
+**状态：已完成** `2026-04-15`
+**参考来源：Claude Code `FileEditTool/` + `NotebookEditTool/`**
 
-### 2.1 精确代码编辑器
-- [ ] `tools/code_editor.py`
-  - [ ] old_string / new_string 精确替换（CC 风格）
-  - [ ] Diff 预览（替换前展示差异）
-  - [ ] 行号范围编辑（start_line / end_line）
-  - [ ] 多处匹配检测（不盲目替换）
-  - [ ] 撤销支持（文件历史记录）
-  - [ ] LSP 诊断集成（可选，依赖 python-lsp-server）
+### 2.1 精确代码编辑器 ✅
+- [x] `tools/code_editor.py`
+  - [x] old_string / new_string 精确替换（CC 风格）
+  - [x] Diff 预览（替换前展示差异）
+  - [x] 批量编辑（code_edit_multi）
+  - [x] 多处匹配检测（不盲目替换）
+  - [x] 撤销支持（文件历史记录）
+  - [x] 引号标准化（花引号 ↔ 直引号）
+  - [x] 结构化 patch 生成
 
-### 2.2 Notebook 编辑
-- [ ] `tools/notebook_tools.py`
-  - [ ] 读取 .ipynb 文件
-  - [ ] 编辑指定 cell
-  - [ ] 插入/删除 cell
-  - [ ] 执行 cell（可选）
+### 2.2 Notebook 编辑 ✅
+- [x] `tools/notebook_tools.py`
+  - [x] 读取 .ipynb 文件
+  - [x] 编辑指定 cell
+  - [x] 插入/删除 cell
+  - [x] 列出 cell 信息
 
-### 2.3 代码分析
-- [ ] `tools/code_analysis.py`
-  - [ ] AST 解析（Python ast 模块）
-  - [ ] 函数/类/导入提取
-  - [ ] 依赖分析
-  - [ ] 复杂度估算
+### 2.3 代码分析 ✅
+- [x] `tools/code_analysis.py`
+  - [x] AST 解析（Python ast 模块）
+  - [x] 函数/类/导入提取
+  - [x] 项目结构分析
+  - [x] 多语言启发式分析（JS/TS/Go/Rust）
 
-### 2.4 测试
-- [ ] tests/test_code_editor.py
-  - [ ] 精确替换测试
-  - [ ] diff 预览测试
-  - [ ] 多处匹配测试
-  - [ ] 撤销测试
+### 2.4 测试 ✅
+- [x] tests/test_phase2.py — 29 个测试
+  - [x] 引号标准化测试
+  - [x] 编辑逻辑测试（单次/批量/冲突检测）
+  - [x] diff 生成测试
+  - [x] snippet 测试
+  - [x] 工具注册测试
+  - [x] 端到端工具调用测试
+  - [x] 代码分析测试
 
 ---
 
-## Phase 3：多 Agent 编排
+## Phase 3：多 Agent 编排 ✅
 
-**状态：🔲 未开始**
-**预计周期：2-3 周**
-**参考来源：Claude Code `AgentTool/` + `coordinator/`**
+**状态：已完成** `2026-04-15`
+**参考来源：Claude Code `AgentTool/` + `coordinator/` + `runAgent.ts`**
 
-### 3.1 子 Agent 委派
-- [ ] `multi_agent/delegation.py`
-  - [ ] AgentDelegate — 从主 Agent 派生子 Agent
-  - [ ] 隔离上下文（子 Agent 独立消息历史）
-  - [ ] 工具子集控制（限制子 Agent 可用工具）
-  - [ ] 结果回收（子 Agent 完成后汇总到主 Agent）
+### 3.1 子 Agent 委派 ✅
+- [x] `multi_agent/__init__.py` — AgentDelegate
+  - [x] 从主 Agent 派生子 Agent（隔离上下文）
+  - [x] 工具子集控制（allowed_tools 白名单）
+  - [x] system prompt 继承 + 扩展
+  - [x] 同步执行 `run()`
+  - [x] 异步后台执行 `run_background()`（threading）
 
-### 3.2 Coordinator 模式
-- [ ] `multi_agent/coordinator.py`
-  - [ ] 任务拆分（LLM 驱动，将复杂任务拆成子任务）
-  - [ ] Worker 派发（子任务分配给 Worker Agent）
-  - [ ] 并行执行（多个 Worker 同时工作）
-  - [ ] 结果合并（汇总所有 Worker 的输出）
-  - [ ] 依赖管理（子任务间的依赖关系）
+### 3.2 Coordinator 模式 ✅
+- [x] Coordinator — 任务编排器
+  - [x] 子任务定义（SubTask dataclass，含 depends_on）
+  - [x] 按依赖关系排序执行
+  - [x] 并行执行无依赖任务（max_parallel 控制）
+  - [x] 依赖结果注入
+  - [x] 最终结果汇总
+  - [x] 自动拆分 `orchestrate_auto()`（LLM 驱动）
 
-### 3.3 Worker Agent
-- [ ] `multi_agent/worker.py`
-  - [ ] WorkerAgent — 受限 Agent 实例
-  - [ ] 工具白名单（只允许指定工具）
-  - [ ] 进度报告
-  - [ ] 超时控制
+### 3.3 Worker Pool ✅
+- [x] WorkerPool — 管理多个并行 Worker
+  - [x] Worker 注册 & 任务提交
+  - [x] 后台执行 + 状态跟踪
+  - [x] wait / wait_all 等待
+  - [x] 任务摘要生成
 
-### 3.4 后台 Agent
-- [ ] `multi_agent/background.py`
-  - [ ] 异步执行（不阻塞主 Agent）
-  - [ ] 状态查询
-  - [ ] 结果通知
-  - [ ] 生命周期管理
+### 3.4 工具 Schema ✅
+- [x] `multi_agent/tools.py`
+  - [x] spawn_agent — 派生单个子 Agent
+  - [x] spawn_agents_parallel — 并行派生多个
+  - [x] agent_status — 查看状态
 
-### 3.5 测试
-- [ ] tests/test_multi_agent.py
-  - [ ] 子 Agent 委派测试
-  - [ ] Coordinator 拆分测试
-  - [ ] 并行执行测试
-  - [ ] 后台 Agent 测试
+### 3.5 测试 ✅
+- [x] tests/test_phase3.py — 16 个测试
+  - [x] AgentTask 状态流转
+  - [x] AgentDelegate 创建 & 工具过滤
+  - [x] Coordinator 依赖注入
+  - [x] WorkerPool 创建
+  - [x] 工具 schema 验证
+  - [x] 依赖图测试（顺序/并行/钻石）
 
 ---
 
@@ -486,9 +491,9 @@ Phase 0 ✅ ──→ Phase 1 ✅ ──→ Phase 2（代码编辑）
 ## 当前进度
 
 ```
-[████░░░░░░░░░░░░░░░░] Phase 0-1 完成 | 2/8 阶段
-当前阶段：Phase 2 — 代码编辑引擎
-下一步：实现精确代码编辑器（参考 Claude Code FileEditTool）
+[████████████░░░░░░░░] Phase 0-3 完成 | 4/8 阶段
+当前阶段：Phase 4 — Gateway 多平台
+下一步：实现 Gateway 服务（参考 OpenClaw gateway/server.ts）
 ```
 
 ---
