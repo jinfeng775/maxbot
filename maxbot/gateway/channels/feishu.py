@@ -1,26 +1,21 @@
 """
-飞书（Feishu/Lark）渠道适配器
+飞书（Feishu/Lark）渠道适配器 — WebSocket 长连接模式
 
-飞书机器人工作流程：
-1. 飞书通过事件订阅把消息推送到我们的 webhook
-2. 我们处理消息，通过飞书 API 回复
+使用 lark_oapi SDK，机器人主动连接飞书，不需要公网 webhook。
+只需要 App ID + App Secret。
 
-需要配置：
-- FEISHU_APP_ID
-- FEISHU_APP_SECRET
-- FEISHU_VERIFICATION_TOKEN（事件验证 token）
-- FEISHU_ENCRYPT_KEY（可选，消息加密 key）
+用法：
+    channel = FeishuChannel(app_id="cli_xxx", app_secret="xxx")
+    await channel.connect()  # 启动 WebSocket 长连接
+    await channel.send_message(OutboundMessage(chat_id="ou_xxx", content="你好"))
 """
 
 from __future__ import annotations
 
-import hashlib
 import json
 import os
 import time
-from typing import Any
-
-import httpx
+from typing import Any, Callable
 
 from maxbot.gateway.channels.base import (
     ChannelAdapter,
@@ -29,41 +24,53 @@ from maxbot.gateway.channels.base import (
     OutboundMessage,
 )
 
+# lark_oapi SDK
+try:
+    import lark_oapi as lark
+    from lark_oapi.api.im.v1 import (
+        CreateMessageRequest,
+        CreateMessageRequestBody,
+        ReplyMessageRequest,
+        ReplyMessageRequestBody,
+    )
+    from lark_oapi.event.dispatcher_handler import EventDispatcherHandler
+    from lark_oapi.ws import Client as FeishuWSClient
+    LARK_AVAILABLE = True
+except ImportError:
+    LARK_AVAILABLE = False
+
 
 class FeishuChannel(ChannelAdapter):
     """
-    飞书机器人渠道适配器
+    飞书渠道 — WebSocket 长连接模式
 
-    用法：
-        channel = FeishuChannel(
-            app_id="cli_xxx",
-            app_secret="xxx",
-        )
-        await channel.connect()
-
-        # 在 FastAPI 中挂载 webhook
-        @app.post("/feishu/webhook")
-        async def feishu_webhook(request: Request):
-            return await channel.handle_webhook(await request.json())
+    只需要 App ID + App Secret，不需要公网 IP。
     """
-
-    BASE_URL = "https://open.feishu.cn/open-apis"
 
     def __init__(
         self,
         app_id: str | None = None,
         app_secret: str | None = None,
-        verification_token: str | None = None,
-        encrypt_key: str | None = None,
     ):
+        if not LARK_AVAILABLE:
+            raise ImportError("需要安装 lark_oapi: pip install lark-oapi")
+
         self._app_id = app_id or os.getenv("FEISHU_APP_ID", "")
         self._app_secret = app_secret or os.getenv("FEISHU_APP_SECRET", "")
-        self._verification_token = verification_token or os.getenv("FEISHU_VERIFICATION_TOKEN", "")
-        self._encrypt_key = encrypt_key or os.getenv("FEISHU_ENCRYPT_KEY", "")
-        self._tenant_access_token: str = ""
-        self._token_expires: float = 0
-        self._http: httpx.AsyncClient | None = None
-        self._message_callback = None
+        self._ws_client: Any = None
+        self._event_handler: Any = None
+        self._message_callback: Callable | None = None
+        self._user_name_cache: dict[str, str] = {}
+
+        self._verification_token = os.getenv("FEISHU_VERIFICATION_TOKEN", "").strip()
+        self._encrypt_key = os.getenv("FEISHU_ENCRYPT_KEY", "").strip()
+
+        # 构建 lark client
+        self._client = lark.Client.builder() \
+            .app_id(self._app_id) \
+            .app_secret(self._app_secret) \
+            .log_level(lark.LogLevel.WARNING) \
+            .build()
 
     @property
     def name(self) -> str:
@@ -75,175 +82,172 @@ class FeishuChannel(ChannelAdapter):
 
     @property
     def capabilities(self) -> list[str]:
-        return ["text", "image", "file", "interactive_card"]
+        return ["text", "image", "file", "audio", "interactive_card"]
 
     async def connect(self) -> bool:
+        """启动 WebSocket 长连接"""
         if not self._app_id or not self._app_secret:
             raise ValueError("飞书 App ID / Secret 未设置")
-        self._http = httpx.AsyncClient(timeout=30)
-        await self._refresh_token()
+
+        # 创建事件处理器
+        self._event_handler = EventDispatcherHandler.builder(
+            self._encrypt_key,
+            self._verification_token,
+        ) \
+            .register_p2_im_message_receive_v1(self._on_receive_message) \
+            .build()
+
+        # 创建 WebSocket 客户端
+        self._ws_client = FeishuWSClient(
+            app_id=self._app_id,
+            app_secret=self._app_secret,
+            event_handler=self._event_handler,
+            log_level=lark.LogLevel.WARNING,
+        )
+
+        # 在后台线程启动 WebSocket
+        import threading
+        t = threading.Thread(target=self._ws_client.start, daemon=True)
+        t.start()
+
         return True
 
     async def disconnect(self):
-        if self._http:
-            await self._http.aclose()
-            self._http = None
+        # lark_oapi WS client 没有 stop()，线程会随进程结束
+        self._ws_client = None
 
     async def send_message(self, message: OutboundMessage) -> bool:
-        """
-        发送消息到飞书
+        """发送消息到飞书"""
+        chat_id = message.chat_id
 
-        message.chat_id 格式：
-        - 用户 open_id: ou_xxx（私聊）
-        - 群 chat_id: oc_xxx（群聊）
-        """
-        if not self._http:
-            return False
+        # 判断是回复还是新消息
+        if message.reply_to:
+            return await self._reply_message(message.reply_to, message.content)
+        else:
+            return await self._create_message(chat_id, message.content)
 
-        token = await self._get_token()
-
-        if message.message_type == MessageType.TEXT:
-            return await self._send_text(token, message.chat_id, message.content, message.reply_to)
-        elif message.message_type == MessageType.IMAGE:
-            return await self._send_image(token, message.chat_id, message.media_path)
-
-        # 默认当文本发
-        return await self._send_text(token, message.chat_id, message.content, message.reply_to)
-
-    async def handle_webhook(self, event: dict) -> dict:
-        """
-        处理飞书 webhook 事件
-
-        返回响应（飞书要求返回 JSON）
-        """
-        # 1. URL 验证 challenge
-        if "challenge" in event:
-            return {"challenge": event["challenge"]}
-
-        # 2. 事件去重（header.event_id）
-        header = event.get("header", {})
-        event_type = header.get("event_type", "")
-
-        # 3. 处理消息事件
-        if event_type == "im.message.receive_v1":
-            msg = await self._parse_message_event(event)
-            if msg and self._message_callback:
-                await self._message_callback(msg)
-
-        return {"code": 0}
-
-    def on_message_callback(self, callback):
+    def on_message_callback(self, callback: Callable):
         """注册消息回调"""
         self._message_callback = callback
 
     # ── 内部方法 ──────────────────────────────────────────
 
-    async def _refresh_token(self):
-        """获取 tenant_access_token"""
-        if not self._http:
-            return
-
-        resp = await self._http.post(
-            f"{self.BASE_URL}/auth/v3/tenant_access_token/internal",
-            json={
-                "app_id": self._app_id,
-                "app_secret": self._app_secret,
-            },
-        )
-        data = resp.json()
-        if data.get("code") == 0:
-            self._tenant_access_token = data["tenant_access_token"]
-            self._token_expires = time.time() + data.get("expire", 7200) - 60
-        else:
-            raise ValueError(f"飞书认证失败: {data}")
-
-    async def _get_token(self) -> str:
-        if time.time() >= self._token_expires:
-            await self._refresh_token()
-        return self._tenant_access_token
-
-    async def _send_text(
-        self,
-        token: str,
-        receive_id: str,
-        text: str,
-        message_id: str | None = None,
-    ) -> bool:
-        """发送文本消息"""
-        if not self._http:
-            return False
-
-        # 判断 receive_id 类型
-        id_type = "open_id" if receive_id.startswith("ou_") else "chat_id"
-
-        body: dict[str, Any] = {
-            "receive_id": receive_id,
-            "msg_type": "text",
-            "content": json.dumps({"text": text}),
-        }
-
+    def _on_receive_message(self, ctx: Any, event: Any):
+        """
+        收到飞书消息的回调（在 lark 线程中同步调用）
+        """
         try:
-            resp = await self._http.post(
-                f"{self.BASE_URL}/im/v1/messages?receive_id_type={id_type}",
-                headers={"Authorization": f"Bearer {token}"},
-                json=body,
+            msg_data = event.event.message
+            sender_id = event.event.sender.sender_id.open_id
+            chat_type = msg_data.chat_type  # "p2p" or "group"
+            msg_type = msg_data.message_type  # "text", "image", etc.
+            message_id = msg_data.message_id
+            chat_id = msg_data.chat_id
+
+            # 解析内容
+            try:
+                content = json.loads(msg_data.content)
+            except (json.JSONDecodeError, TypeError):
+                content = {"text": str(msg_data.content)}
+
+            # 提取文本
+            text = ""
+            if msg_type == "text":
+                text = content.get("text", "")
+            elif msg_type == "image":
+                text = content.get("image_key", "[图片]")
+            elif msg_type == "audio":
+                text = content.get("file_key", "[语音]")
+            elif msg_type == "file":
+                text = content.get("file_key", "[文件]")
+            else:
+                text = json.dumps(content, ensure_ascii=False)
+
+            # 构建 InboundMessage
+            inbound = InboundMessage(
+                channel="feishu",
+                channel_message_id=message_id,
+                chat_id=sender_id if chat_type == "p2p" else chat_id,
+                sender_id=sender_id,
+                sender_name=self._get_user_name(sender_id),
+                content=text,
+                is_group=chat_type == "group",
+                raw={"event": event.event.model_dump() if hasattr(event.event, "model_dump") else {}},
             )
-            data = resp.json()
-            return data.get("code") == 0
+
+            if msg_type == "text":
+                inbound.message_type = MessageType.TEXT
+            elif msg_type == "image":
+                inbound.message_type = MessageType.IMAGE
+            elif msg_type in ("audio", "opus"):
+                inbound.message_type = MessageType.AUDIO
+            elif msg_type == "file":
+                inbound.message_type = MessageType.FILE
+            else:
+                inbound.message_type = MessageType.TEXT
+
+            # 调用回调
+            if self._message_callback:
+                import asyncio
+                try:
+                    loop = asyncio.get_event_loop()
+                    if loop.is_running():
+                        asyncio.ensure_future(self._message_callback(inbound))
+                    else:
+                        loop.run_until_complete(self._message_callback(inbound))
+                except RuntimeError:
+                    # 没有事件循环，创建一个
+                    asyncio.run(self._message_callback(inbound))
+
+        except Exception as e:
+            print(f"❌ 飞书消息处理失败: {e}")
+            import traceback
+            traceback.print_exc()
+
+    def _get_user_name(self, open_id: str) -> str:
+        """获取用户名（缓存）"""
+        if open_id in self._user_name_cache:
+            return self._user_name_cache[open_id]
+        # 简化：直接返回 open_id 的短格式
+        short = open_id[-8:] if len(open_id) > 8 else open_id
+        return f"user_{short}"
+
+    def _create_message(self, receive_id: str, text: str) -> bool:
+        """发送新消息"""
+        try:
+            # 判断 ID 类型
+            id_type = "open_id" if receive_id.startswith("ou_") else "chat_id"
+
+            req = CreateMessageRequest.builder() \
+                .receive_id_type(id_type) \
+                .request_body(
+                    CreateMessageRequestBody.builder()
+                    .receive_id(receive_id)
+                    .msg_type("text")
+                    .content(json.dumps({"text": text}))
+                    .build()
+                ).build()
+
+            resp = self._client.im.v1.message.create(req)
+            return resp.success()
         except Exception as e:
             print(f"❌ 飞书发送失败: {e}")
             return False
 
-    async def _send_image(self, token: str, receive_id: str, image_path: str) -> bool:
-        """发送图片（需先上传获取 image_key）"""
-        # TODO: 实现图片上传 + 发送
-        return await self._send_text(token, receive_id, f"[图片: {image_path}]")
-
-    async def _parse_message_event(self, event: dict) -> InboundMessage | None:
-        """解析飞书消息事件为 InboundMessage"""
+    def _reply_message(self, message_id: str, text: str) -> bool:
+        """回复消息"""
         try:
-            event_data = event.get("event", {})
-            message_data = event_data.get("message", {})
-            sender_data = event_data.get("sender", {}).get("sender_id", {})
+            req = ReplyMessageRequest.builder() \
+                .message_id(message_id) \
+                .request_body(
+                    ReplyMessageRequestBody.builder()
+                    .msg_type("text")
+                    .content(json.dumps({"text": text}))
+                    .build()
+                ).build()
 
-            msg_type = message_data.get("message_type", "text")
-            content_str = message_data.get("content", "{}")
-            try:
-                content = json.loads(content_str)
-            except json.JSONDecodeError:
-                content = {"text": content_str}
-
-            msg = InboundMessage(
-                channel="feishu",
-                channel_message_id=message_data.get("message_id", ""),
-                chat_id=sender_data.get("open_id", ""),
-                sender_id=sender_data.get("open_id", ""),
-                sender_name=sender_data.get("open_id", ""),  # 需要额外 API 获取昵称
-                content=content.get("text", ""),
-                is_group=message_data.get("chat_type") == "group",
-                raw=event,
-            )
-
-            # 群聊时 chat_id 用群 ID
-            if msg.is_group:
-                msg.chat_id = message_data.get("chat_id", "")
-
-            if msg_type == "text":
-                msg.message_type = MessageType.TEXT
-            elif msg_type == "image":
-                msg.message_type = MessageType.IMAGE
-                msg.content = content.get("image_key", "")
-            elif msg_type == "file":
-                msg.message_type = MessageType.FILE
-                msg.content = content.get("file_key", "")
-            elif msg_type == "audio":
-                msg.message_type = MessageType.AUDIO
-            else:
-                msg.message_type = MessageType.TEXT
-                msg.content = content.get("text", json.dumps(content, ensure_ascii=False))
-
-            return msg
-
+            resp = self._client.im.v1.message.reply(req)
+            return resp.success()
         except Exception as e:
-            print(f"⚠️ 飞书消息解析失败: {e}")
-            return None
+            print(f"❌ 飞书回复失败: {e}")
+            return False
