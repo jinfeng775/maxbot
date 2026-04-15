@@ -9,6 +9,7 @@ from maxbot.gateway.channels.base import (
 )
 from maxbot.gateway.channels.http_channel import HttpChannel
 from maxbot.gateway.channels.telegram import TelegramChannel
+from maxbot.gateway.channels.feishu import FeishuChannel
 
 __all__ = [
     "ChannelAdapter",
@@ -18,4 +19,5 @@ __all__ = [
     "OutboundMessage",
     "HttpChannel",
     "TelegramChannel",
+    "FeishuChannel",
 ]

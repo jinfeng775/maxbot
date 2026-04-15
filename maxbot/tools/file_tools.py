@@ -17,8 +17,8 @@ def read_file(path: str, offset: int = 1, limit: int = 500) -> str:
         return json.dumps({"error": f"文件不存在: {path}"})
     lines = p.read_text(encoding="utf-8", errors="replace").splitlines()
     total = len(lines)
-    start = max(0, offset - 1)
-    end = min(total, start + limit)
+    start = max(0, int(offset) - 1)
+    end = min(total, start + int(limit))
     content = "\n".join(f"{i+1}|{line}" for i, line in enumerate(lines[start:end], start=start))
     return json.dumps({"content": content, "total_lines": total, "showing": f"{start+1}-{end}"})
 
