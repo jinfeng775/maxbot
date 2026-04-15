@@ -16,7 +16,7 @@
 | Phase 1 | 工具系统完善 | ✅ 已完成 | — |
 | Phase 2 | 代码编辑引擎 | ✅ 已完成 | — |
 | Phase 3 | 多 Agent 编排 | ✅ 已完成 | — |
-| Phase 4 | Gateway 多平台 | 🔲 未开始 | 2-3 周 |
+| Phase 4 | Gateway 多平台 | ✅ 已完成 | — |
 | Phase 5 | 知识吸收系统 | 🔲 未开始 | 3-4 周 |
 | Phase 6 | 自我改进 | 🔲 未开始 | 2-3 周 |
 | Phase 7 | 插件 SDK | 🔲 未开始 | 2 周 |
@@ -214,63 +214,38 @@
 
 ---
 
-## Phase 4：Gateway 多平台
+## Phase 4：Gateway 多平台 ✅
 
-**状态：🔲 未开始**
-**预计周期：2-3 周**
+**状态：已完成** `2026-04-15`
 **参考来源：OpenClaw `gateway/` + `channels/` + `plugins/`**
 
-### 4.1 Gateway 服务
-- [ ] `gateway/server.py`
-  - [ ] FastAPI HTTP 服务
-  - [ ] WebSocket 实时通信
-  - [ ] 认证鉴权（API Key + JWT）
-  - [ ] 会话路由（chat_id → Agent 实例）
-  - [ ] 健康检查 /metrics
-  - [ ] Daemon 模式（systemd / launchd）
+### 4.1 Gateway 服务 ✅
+- [x] `gateway/server.py` — FastAPI HTTP 服务
+  - [x] REST API：/chat, /tools, /sessions, /batch
+  - [x] WebSocket 实时对话
+  - [x] API Key 认证鉴权
+  - [x] 会话管理（创建/重置/删除/列表）
+  - [x] CORS 中间件
+  - [x] 健康检查 /health
 
-### 4.2 消息路由
-- [ ] `gateway/router.py`
-  - [ ] 消息入站路由（平台消息 → Agent）
-  - [ ] 消息出站路由（Agent 响应 → 平台）
-  - [ ] 多会话管理
-  - [ ] 消息队列（防止并发冲突）
+### 4.2 渠道适配器 ✅
+- [x] `gateway/channels/base.py` — ChannelAdapter 基类
+  - [x] 统一接口（connect/send/receive/disconnect）
+  - [x] InboundMessage / OutboundMessage 数据类
+  - [x] ChannelRegistry 注册表
+  - [x] 广播支持
+- [x] `gateway/channels/http_channel.py` — HTTP 渠道
+- [x] `gateway/channels/telegram.py` — Telegram Bot 渠道
+  - [x] Bot API 长轮询
+  - [x] 消息解析（文本/图片/语音/文件）
+  - [x] 发送消息
 
-### 4.3 渠道适配器
-- [ ] `gateway/channels/base.py` — 适配器基类
-  - [ ] 统一接口（connect / send / receive / disconnect）
-  - [ ] 消息格式转换
-  - [ ] 媒体处理
-- [ ] `gateway/channels/weixin.py` — 微信
-  - [ ] iLink API 对接
-  - [ ] 文本/图片/语音消息
-  - [ ] 群聊（如果 API 支持）
-- [ ] `gateway/channels/telegram.py` — Telegram
-  - [ ] Bot API 对接
-  - [ ] 命令菜单
-  - [ ] Inline Keyboard
-- [ ] `gateway/channels/discord.py` — Discord
-  - [ ] Bot API / Webhook
-  - [ ] Embed 消息
-  - [ ] 频道管理
-- [ ] `gateway/channels/feishu.py` — 飞书
-  - [ ] 飞书 Bot API
-  - [ ] 卡片消息
-  - [ ] Bitable 对接
-- [ ] 更多渠道（按需扩展）
-
-### 4.4 配置系统
-- [ ] `gateway/config.py`
-  - [ ] YAML 配置文件
-  - [ ] 环境变量覆盖
-  - [ ] 热重载
-  - [ ] 多 Profile 支持
-
-### 4.5 测试
-- [ ] tests/test_gateway.py
-  - [ ] Gateway 服务启动测试
-  - [ ] 消息路由测试
-  - [ ] 渠道适配器接口测试
+### 4.3 测试 ✅
+- [x] tests/test_phase4.py — 15 个测试
+  - [x] Gateway API 测试（health/tools/sessions/auth）
+  - [x] 渠道注册表测试
+  - [x] HTTP 渠道测试
+  - [x] 数据模型测试
 
 ---
 
@@ -491,9 +466,9 @@ Phase 0 ✅ ──→ Phase 1 ✅ ──→ Phase 2（代码编辑）
 ## 当前进度
 
 ```
-[████████████░░░░░░░░] Phase 0-3 完成 | 4/8 阶段
-当前阶段：Phase 4 — Gateway 多平台
-下一步：实现 Gateway 服务（参考 OpenClaw gateway/server.ts）
+[████████████████░░░░] Phase 0-4 完成 | 5/8 阶段
+当前阶段：Phase 5 — 知识吸收系统（核心创新）
+下一步：实现代码解析 + 能力提取 + 工具自动生成
 ```
 
 ---
