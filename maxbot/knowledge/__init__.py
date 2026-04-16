@@ -72,20 +72,21 @@ from maxbot.knowledge.auto_register import (
     RegistrationResult,
 )
 from maxbot.knowledge.self_analyzer import (
-    Issue,
-    AnalysisReport,
-    analyze_self,
+    CapabilityGap,
+    CapabilityInventory,
+    SelfAssessment,
+    assess,
 )
-from maxbot.knowledge.patch_generator import (
-    Patch,
-    generate_patch,
-    generate_patches,
-    validate_patch,
+from maxbot.knowledge.review_board import (
+    Verdict,
+    ReviewOpinion,
+    ReviewBoardResult,
+    ReviewBoard,
 )
 from maxbot.knowledge.self_improver import (
-    ImprovementAttempt,
-    ImprovementResult,
-    SelfImprover,
+    EvolutionAttempt,
+    EvolutionResult,
+    SelfEvolver,
 )
 
 
@@ -269,14 +270,15 @@ __all__ = [
     "run_sandboxed",
     "batch_validate",
     # Self-improvement (Phase 6)
-    "Issue",
-    "AnalysisReport",
-    "analyze_self",
-    "Patch",
-    "generate_patch",
-    "generate_patches",
-    "validate_patch",
-    "ImprovementAttempt",
-    "ImprovementResult",
-    "SelfImprover",
+    "CapabilityGap",
+    "CapabilityInventory",
+    "SelfAssessment",
+    "assess",
+    "Verdict",
+    "ReviewOpinion",
+    "ReviewBoardResult",
+    "ReviewBoard",
+    "EvolutionAttempt",
+    "EvolutionResult",
+    "SelfEvolver",
 ]

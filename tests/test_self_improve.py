@@ -1,279 +1,336 @@
 """
-Phase 6 自我改进 — 测试
+Phase 6 自我进化 — 测试
 
 覆盖:
-- self_analyzer: Issue/AnalysisReport 数据结构
-- patch_generator: Patch 结构、diff 提取、文件提取、补丁验证
-- self_improver: 改进流程（用 mock LLM）、回滚、历史记录
+- self_analyzer: CapabilityGap, SelfAssessment, 能力盘点
+- review_board: Verdict, ReviewOpinion, ReviewBoardResult, 投票逻辑
+- self_improver: EvolutionAttempt, SelfEvolver, 进化循环
 """
 
 import json
 import tempfile
 from pathlib import Path
-from unittest.mock import MagicMock, patch as mock_patch
+from unittest.mock import MagicMock
 
 import pytest
 
 
 # ══════════════════════════════════════════════════════════════
-# Self Analyzer Tests
+# Self Analyzer — 能力缺口分析
 # ══════════════════════════════════════════════════════════════
 
-from maxbot.knowledge.self_analyzer import Issue, AnalysisReport
-
-
-class TestIssue:
-    """Issue 数据结构"""
-
-    def test_create(self):
-        issue = Issue(
-            category="bug",
-            severity="high",
-            file="core/agent_loop.py",
-            line=42,
-            title="空指针风险",
-            description="未检查 None",
-            suggestion="添加空值检查",
-        )
-        assert issue.category == "bug"
-        assert issue.severity == "high"
-
-    def test_defaults(self):
-        issue = Issue(category="code_quality", severity="low", file="x.py")
-        assert issue.line is None
-        assert issue.title == ""
-
-
-class TestAnalysisReport:
-    """分析报告"""
-
-    def test_empty_report(self):
-        report = AnalysisReport(project_root="/test")
-        assert report.total_count == 0
-        assert report.critical_count == 0
-
-    def test_counts(self):
-        report = AnalysisReport(
-            project_root="/test",
-            issues=[
-                Issue(category="bug", severity="critical", file="a.py"),
-                Issue(category="bug", severity="high", file="b.py"),
-                Issue(category="performance", severity="low", file="c.py"),
-            ],
-        )
-        assert report.total_count == 3
-        assert report.critical_count == 1
-
-    def test_by_category(self):
-        report = AnalysisReport(
-            project_root="/test",
-            issues=[
-                Issue(category="bug", severity="high", file="a.py"),
-                Issue(category="performance", severity="low", file="b.py"),
-                Issue(category="bug", severity="medium", file="c.py"),
-            ],
-        )
-        by_cat = report.by_category()
-        assert len(by_cat["bug"]) == 2
-        assert len(by_cat["performance"]) == 1
-
-    def test_text_report(self):
-        report = AnalysisReport(
-            project_root="/test",
-            issues=[Issue(
-                category="bug", severity="high", file="x.py", line=10,
-                title="Test bug", description="A bug", suggestion="Fix it",
-            )],
-        )
-        text = report.text_report()
-        assert "Test bug" in text
-        assert "x.py:10" in text
-        assert "Fix it" in text
-
-
-# ══════════════════════════════════════════════════════════════
-# Patch Generator Tests
-# ══════════════════════════════════════════════════════════════
-
-from maxbot.knowledge.patch_generator import (
-    Patch, _extract_diff, _extract_changed_files, validate_patch,
+from maxbot.knowledge.self_analyzer import (
+    CapabilityGap, CapabilityInventory, SelfAssessment, assess,
 )
 
 
-class TestPatch:
-    """Patch 数据结构"""
+class TestCapabilityGap:
+    """能力缺口"""
 
-    def test_valid_patch(self):
-        p = Patch(
-            issue_title="fix bug",
-            diff="--- a/file.py\n+++ b/file.py\n@@ -1,3 +1,3 @@\n-old\n+new\n",
-            files_changed=["file.py"],
+    def test_create(self):
+        gap = CapabilityGap(
+            domain="web_browsing",
+            description="无法自动化操作网页",
+            evidence="用户反复要求操作网页但做不到",
+            priority="high",
+            suggested_solution="吸收 browser automation 代码",
+            source="user_pattern",
         )
-        assert p.is_valid()
+        assert gap.domain == "web_browsing"
+        assert gap.priority == "high"
 
-    def test_empty_patch(self):
-        p = Patch(issue_title="nothing")
-        assert not p.is_valid()
-
-    def test_no_diff_markers(self):
-        p = Patch(issue_title="bad", diff="just some text")
-        assert not p.is_valid()
-
-
-class TestDiffExtraction:
-    """从 LLM 响应提取 diff"""
-
-    def test_plain_diff(self):
-        content = """--- a/file.py
-+++ b/file.py
-@@ -1,3 +1,3 @@
--old
-+new"""
-        diff = _extract_diff(content)
-        assert "--- a/file.py" in diff
-        assert "+new" in diff
-
-    def test_markdown_wrapped(self):
-        content = """```diff
---- a/file.py
-+++ b/file.py
-@@ -1,3 +1,3 @@
--old
-+new
-```"""
-        diff = _extract_diff(content)
-        assert "--- a/file.py" in diff
-        assert "```" not in diff
-
-    def test_no_diff(self):
-        content = "I can't fix this issue."
-        diff = _extract_diff(content)
-        assert diff == ""
-
-    def test_extract_files(self):
-        diff = """--- a/core/agent.py
-+++ b/core/agent.py
-@@ -1,1 +1,1 @@
--old
-+new
---- a/tools/shell.py
-+++ b/tools/shell.py
-@@ -1,1 +1,1 @@
--x
-+y"""
-        files = _extract_changed_files(diff)
-        assert "core/agent.py" in files
-        assert "tools/shell.py" in files
-
-
-class TestPatchValidation:
-    """补丁验证"""
-
-    def test_invalid_patch(self):
-        p = Patch(issue_title="bad")
-        ok, reason = validate_patch(p, "/nonexistent")
-        assert not ok
-
-    def test_valid_diff_format_with_bad_project(self):
-        p = Patch(
-            issue_title="fix",
-            diff="--- a/file.py\n+++ b/file.py\n@@ -1,1 +1,1 @@\n-old\n+new\n",
+    def test_defaults(self):
+        gap = CapabilityGap(
+            domain="test",
+            description="test",
+            evidence="test",
+            priority="low",
         )
-        ok, reason = validate_patch(p, "/nonexistent")
-        assert not ok  # git apply fails on nonexistent dir
+        assert gap.suggested_solution == ""
+
+
+class TestCapabilityInventory:
+    """能力清单"""
+
+    def test_empty(self):
+        inv = CapabilityInventory()
+        assert len(inv.tools) == 0
+        assert len(inv.domains_covered) == 0
+
+    def test_with_tools(self):
+        inv = CapabilityInventory(
+            tools=["read_file", "write_file", "shell", "web_search"],
+            skills=["code-review"],
+            toolsets=["builtin", "absorbed"],
+            domains_covered=["file", "shell", "web"],
+        )
+        assert len(inv.tools) == 4
+
+
+class TestSelfAssessment:
+    """自我评估"""
+
+    def test_empty_assessment(self):
+        assessment = SelfAssessment()
+        assert len(assessment.gaps) == 0
+        assert len(assessment.top_gaps(5)) == 0
+
+    def test_top_gaps_by_priority(self):
+        assessment = SelfAssessment(
+            gaps=[
+                CapabilityGap(domain="a", description="a", evidence="a", priority="low"),
+                CapabilityGap(domain="b", description="b", evidence="b", priority="critical"),
+                CapabilityGap(domain="c", description="c", evidence="c", priority="medium"),
+                CapabilityGap(domain="d", description="d", evidence="d", priority="high"),
+            ],
+        )
+        top = assessment.top_gaps(2)
+        assert len(top) == 2
+        assert top[0].priority == "critical"
+        assert top[1].priority == "high"
+
+    def test_inventory_build(self):
+        """测试能力盘点（无 LLM）"""
+        # 用 mock registry
+        mock_registry = MagicMock()
+        mock_tool1 = MagicMock()
+        mock_tool1.name = "read_file"
+        mock_tool1.toolset = "builtin"
+        mock_tool2 = MagicMock()
+        mock_tool2.name = "shell"
+        mock_tool2.toolset = "builtin"
+        mock_tool3 = MagicMock()
+        mock_tool3.name = "git_status"
+        mock_tool3.toolset = "builtin"
+        mock_registry.list_tools.return_value = [mock_tool1, mock_tool2, mock_tool3]
+
+        result = assess(tool_registry=mock_registry)
+        assert "read_file" in result.inventory.tools
+        assert "shell" in result.inventory.tools
+        assert "file" in result.inventory.domains_covered
+        assert "shell" in result.inventory.domains_covered
+        assert "git" in result.inventory.domains_covered
 
 
 # ══════════════════════════════════════════════════════════════
-# Self Improver Tests
+# Review Board — 审批委员会
 # ══════════════════════════════════════════════════════════════
 
-from maxbot.knowledge.self_improver import SelfImprover, ImprovementResult
+from maxbot.knowledge.review_board import (
+    Verdict, ReviewOpinion, ReviewBoardResult, ReviewBoard,
+)
 
 
-class TestSelfImprover:
-    """自我改进器"""
+class TestVerdict:
+    """裁决枚举"""
 
-    def test_nonexistent_project(self):
-        improver = SelfImprover("/nonexistent")
-        # git clean check should fail gracefully
-        assert improver._is_git_clean() is False
-
-    def test_history_empty(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            improver = SelfImprover(tmp)
-            assert improver.get_history() == []
-
-    def test_history_save_and_read(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            improver = SelfImprover(tmp)
-
-            result = ImprovementResult(
-                project_root=tmp,
-                attempts=[],
-            )
-            result.attempts.append(type('obj', (object,), {
-                'issue': type('obj', (object,), {
-                    'title': 'fix bug',
-                    'category': 'bug',
-                })(),
-                'applied': True,
-                'test_passed': True,
-                'rolled_back': False,
-                'error': '',
-                'elapsed': 1.5,
-            })())
-
-            improver._save_history(result)
-            history = improver.get_history()
-            assert len(history) == 1
-            assert history[0]["issue"] == "fix bug"
-            assert history[0]["applied"] is True
-
-    def test_rollback(self):
-        with tempfile.TemporaryDirectory() as tmp:
-            # Initialize git repo
-            subprocess = __import__("subprocess")
-            subprocess.run(["git", "init"], cwd=tmp, capture_output=True)
-            subprocess.run(["git", "config", "user.email", "test@test.com"], cwd=tmp, capture_output=True)
-
-            # Create and commit a file
-            p = Path(tmp) / "test.txt"
-            p.write_text("original")
-            subprocess.run(["git", "add", "."], cwd=tmp, capture_output=True)
-            subprocess.run(["git", "commit", "-m", "init"], cwd=tmp, capture_output=True)
-
-            # Modify file
-            p.write_text("modified")
-
-            improver = SelfImprover(tmp)
-            improver._rollback()
-
-            assert p.read_text() == "original"
+    def test_values(self):
+        assert Verdict.APPROVE.value == "approve"
+        assert Verdict.REJECT.value == "reject"
+        assert Verdict.REVISE.value == "revise"
 
 
-class TestImprovementResult:
-    """改进结果"""
+class TestReviewOpinion:
+    """单个评审意见"""
 
-    def test_summary(self):
-        result = ImprovementResult(project_root="/test")
-        text = result.summary()
-        assert "自我改进报告" in text
-        assert "0" in text  # 0 issues, 0 attempts
+    def test_create(self):
+        opinion = ReviewOpinion(
+            reviewer="安全审查员",
+            perspective="安全风险",
+            verdict=Verdict.APPROVE,
+            score=0.85,
+            reasoning="代码安全，无注入风险",
+            confidence=0.9,
+        )
+        assert opinion.reviewer == "安全审查员"
+        assert opinion.score == 0.85
+
+
+class TestReviewBoardResult:
+    """委员会结果"""
+
+    def test_empty(self):
+        result = ReviewBoardResult()
+        assert result.approve_count == 0
+        assert result.reject_count == 0
 
     def test_counts(self):
-        from maxbot.knowledge.self_improver import ImprovementAttempt
-        result = ImprovementResult(
-            project_root="/test",
+        result = ReviewBoardResult(
+            opinions=[
+                ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.APPROVE, score=0.8, reasoning="ok", confidence=0.9),
+                ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.APPROVE, score=0.7, reasoning="ok", confidence=0.8),
+                ReviewOpinion(reviewer="C", perspective="z", verdict=Verdict.REJECT, score=0.3, reasoning="bad", confidence=0.7),
+            ],
+        )
+        assert result.approve_count == 2
+        assert result.reject_count == 1
+
+    def test_text_report(self):
+        result = ReviewBoardResult(
+            opinions=[
+                ReviewOpinion(reviewer="能力审查员", perspective="新能力验证", verdict=Verdict.APPROVE, score=0.9, reasoning="带来了新能力", confidence=0.85),
+            ],
+            approval_score=0.9,
+            final_verdict=Verdict.APPROVE,
+        )
+        text = result.text_report()
+        assert "能力审查员" in text
+        assert "新能力验证" in text
+
+
+class TestReviewBoardVoting:
+    """投票逻辑（不用 LLM，直接测决策逻辑）"""
+
+    def test_unanimous_approve(self):
+        board = ReviewBoard(llm_client=None, quorum=3, approval_threshold=0.6)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.APPROVE, score=0.9, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.APPROVE, score=0.8, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="C", perspective="z", verdict=Verdict.APPROVE, score=0.7, reasoning="", confidence=0.8),
+        ]
+        score = board._calc_score(opinions)
+        verdict = board._decide(opinions, score)
+        assert verdict == Verdict.APPROVE
+
+    def test_majority_approve(self):
+        board = ReviewBoard(llm_client=None, quorum=3, approval_threshold=0.6)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.APPROVE, score=0.9, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.APPROVE, score=0.8, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="C", perspective="z", verdict=Verdict.REJECT, score=0.3, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="D", perspective="w", verdict=Verdict.APPROVE, score=0.7, reasoning="", confidence=0.8),
+        ]
+        score = board._calc_score(opinions)
+        verdict = board._decide(opinions, score)
+        assert verdict == Verdict.APPROVE
+
+    def test_all_reject(self):
+        board = ReviewBoard(llm_client=None, quorum=3, approval_threshold=0.6)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.REJECT, score=0.2, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.REJECT, score=0.3, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="C", perspective="z", verdict=Verdict.REJECT, score=0.1, reasoning="", confidence=0.8),
+        ]
+        score = board._calc_score(opinions)
+        verdict = board._decide(opinions, score)
+        assert verdict == Verdict.REJECT
+
+    def test_all_revise(self):
+        board = ReviewBoard(llm_client=None, quorum=3, approval_threshold=0.6)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.REVISE, score=0.5, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.REVISE, score=0.5, reasoning="", confidence=0.8),
+        ]
+        score = board._calc_score(opinions)
+        verdict = board._decide(opinions, score)
+        assert verdict == Verdict.REVISE
+
+    def test_score_below_threshold(self):
+        board = ReviewBoard(llm_client=None, quorum=2, approval_threshold=0.7)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.APPROVE, score=0.5, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.APPROVE, score=0.6, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="C", perspective="z", verdict=Verdict.REVISE, score=0.5, reasoning="", confidence=0.8),
+        ]
+        score = board._calc_score(opinions)
+        verdict = board._decide(opinions, score)
+        # 2 approve + 1 revise, no reject → REVISE (not enough for approve, but no hard reject)
+        assert verdict == Verdict.REVISE
+
+    def test_score_below_threshold_with_reject(self):
+        board = ReviewBoard(llm_client=None, quorum=2, approval_threshold=0.7)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.APPROVE, score=0.5, reasoning="", confidence=0.8),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.REJECT, score=0.3, reasoning="", confidence=0.8),
+        ]
+        score = board._calc_score(opinions)
+        verdict = board._decide(opinions, score)
+        # 1 approve + 1 reject, quorum not met → REJECT
+        assert verdict == Verdict.REJECT
+
+    def test_weighted_score(self):
+        board = ReviewBoard(llm_client=None)
+        opinions = [
+            ReviewOpinion(reviewer="A", perspective="x", verdict=Verdict.APPROVE, score=1.0, reasoning="", confidence=0.9),
+            ReviewOpinion(reviewer="B", perspective="y", verdict=Verdict.APPROVE, score=0.2, reasoning="", confidence=0.1),
+        ]
+        score = board._calc_score(opinions)
+        # Weighted: (1.0*0.9 + 0.2*0.1) / (0.9+0.1) = 0.92/1.0 = 0.92
+        assert score > 0.85  # High-confidence reviewer dominates
+
+
+# ══════════════════════════════════════════════════════════════
+# Self Evolver — 进化循环
+# ══════════════════════════════════════════════════════════════
+
+from maxbot.knowledge.self_improver import (
+    EvolutionAttempt, EvolutionResult, SelfEvolver,
+)
+
+
+class TestEvolutionResult:
+    """进化结果"""
+
+    def test_empty(self):
+        result = EvolutionResult()
+        assert result.evolved_count == 0
+        assert result.rejected_count == 0
+
+    def test_summary(self):
+        result = EvolutionResult()
+        text = result.summary()
+        assert "进化报告" in text
+
+    def test_counts(self):
+        result = EvolutionResult(
+            assessment=SelfAssessment(
+                gaps=[
+                    CapabilityGap(domain="a", description="a", evidence="a", priority="high"),
+                ],
+            ),
             attempts=[
-                ImprovementAttempt(
-                    issue=Issue(category="bug", severity="high", file="a.py", title="fix a"),
-                    applied=True, test_passed=True, rolled_back=False,
-                ),
-                ImprovementAttempt(
-                    issue=Issue(category="bug", severity="medium", file="b.py", title="fix b"),
-                    applied=True, test_passed=False, rolled_back=True,
+                EvolutionAttempt(
+                    gap=CapabilityGap(domain="a", description="a", evidence="a", priority="high"),
+                    evolved=True,
                 ),
             ],
         )
-        assert result.applied_count == 1
-        assert result.failed_count == 1
+        assert result.evolved_count == 1
+
+
+class TestSelfEvolver:
+    """自我进化器"""
+
+    def test_no_gaps(self):
+        """没有缺口时不进化"""
+        mock_registry = MagicMock()
+        mock_registry.list_tools.return_value = []
+
+        evolver = SelfEvolver(
+            project_root="/tmp/nonexistent_maxbot_test",
+            tool_registry=mock_registry,
+        )
+        # 没有 LLM，assess 返回基础评估，没有 gaps
+        result = evolver.evolve(llm_client=None)
+        assert len(result.attempts) == 0
+
+    def test_history_empty(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            evolver = SelfEvolver(project_root=tmp)
+            assert evolver.get_history() == []
+
+
+class TestEvolutionAttempt:
+    """单次进化尝试"""
+
+    def test_default(self):
+        gap = CapabilityGap(
+            domain="browser",
+            description="没有浏览器自动化",
+            evidence="用户需要",
+            priority="high",
+        )
+        attempt = EvolutionAttempt(gap=gap)
+        assert attempt.evolved is False
+        assert len(attempt.capabilities) == 0
+        assert attempt.elapsed == 0.0

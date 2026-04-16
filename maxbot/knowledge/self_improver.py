@@ -1,297 +1,317 @@
 """
-自我改进器 — 自动分析、生成补丁、测试、应用
+自我进化器 — 能力进化的核心循环
 
-核心循环:
-1. 分析自身代码 → 发现问题
-2. 为每个问题生成补丁
-3. 应用补丁 → 跑测试
-4. 测试通过 → 保留；测试失败 → 回滚
-5. 记录改进历史
+真正的能力进化，不是修 bug：
+
+1. 自我评估 → 发现能力缺口
+2. 知识吸收 → 从代码仓库获取新能力
+3. 提交审批 → 多维度子代理独立评审
+4. 进化注册 → 审批通过后注册为工具/技能
 
 用法:
-    improver = SelfImprover("/path/to/maxbot")
-    result = improver.run(llm_client)
+    improver = SelfEvolver("/root/maxbot")
+    result = improver.evolve(llm_client)
     print(result.summary())
 """
 
 from __future__ import annotations
 
 import json
-import subprocess
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from maxbot.knowledge.self_analyzer import analyze_self, Issue, AnalysisReport
-from maxbot.knowledge.patch_generator import generate_patch, validate_patch, Patch
+from maxbot.knowledge.self_analyzer import (
+    assess, SelfAssessment, CapabilityGap, CapabilityInventory,
+)
+from maxbot.knowledge.code_parser import scan_project
+from maxbot.knowledge.capability_extractor import extract_from_repo, ExtractedCapability
+from maxbot.knowledge.skill_factory import SkillFactory, GeneratedSkill
+from maxbot.knowledge.sandbox_validator import batch_validate, ValidationResult
+from maxbot.knowledge.auto_register import AutoRegister, RegistrationResult
+from maxbot.knowledge.review_board import (
+    ReviewBoard, ReviewBoardResult, Verdict, ReviewOpinion,
+)
 
 
 @dataclass
-class ImprovementAttempt:
-    """单次改进尝试"""
-    issue: Issue
-    patch: Patch | None = None
-    applied: bool = False
-    test_passed: bool | None = None
-    test_output: str = ""
-    rolled_back: bool = False
+class EvolutionAttempt:
+    """单次进化尝试"""
+    gap: CapabilityGap
+    absorbed_from: str = ""           # 从哪里吸收的知识
+    capabilities: list[ExtractedCapability] = field(default_factory=list)
+    validations: list[ValidationResult] = field(default_factory=list)
+    review: ReviewBoardResult | None = None
+    registered: list[RegistrationResult] = field(default_factory=list)
+    evolved: bool = False             # 最终是否成功进化
     error: str = ""
     elapsed: float = 0.0
 
 
 @dataclass
-class ImprovementResult:
-    """改进结果"""
-    project_root: str
-    report: AnalysisReport | None = None
-    attempts: list[ImprovementAttempt] = field(default_factory=list)
+class EvolutionResult:
+    """进化结果"""
+    assessment: SelfAssessment | None = None
+    attempts: list[EvolutionAttempt] = field(default_factory=list)
     total_elapsed: float = 0.0
 
     @property
-    def applied_count(self) -> int:
-        return sum(1 for a in self.attempts if a.applied and a.test_passed and not a.rolled_back)
+    def evolved_count(self) -> int:
+        return sum(1 for a in self.attempts if a.evolved)
 
     @property
-    def failed_count(self) -> int:
-        return sum(1 for a in self.attempts if a.rolled_back)
+    def rejected_count(self) -> int:
+        return sum(1 for a in self.attempts if a.review and a.review.final_verdict == Verdict.REJECT)
 
     def summary(self) -> str:
         lines = [
-            f"## 自我改进报告",
-            f"- 发现问题: {self.report.total_count if self.report else 0}",
-            f"- 尝试修复: {len(self.attempts)}",
-            f"- 成功应用: {self.applied_count}",
-            f"- 回滚: {self.failed_count}",
+            "## 进化报告",
+            f"- 发现缺口: {len(self.assessment.gaps) if self.assessment else 0}",
+            f"- 尝试进化: {len(self.attempts)}",
+            f"- 成功进化: {self.evolved_count}",
+            f"- 被否决: {self.rejected_count}",
             f"- 耗时: {self.total_elapsed:.1f}s",
         ]
         for a in self.attempts:
-            status = "✅" if (a.applied and a.test_passed and not a.rolled_back) else "❌"
-            lines.append(f"- {status} {a.issue.title}" + (f" — {a.error}" if a.error else ""))
+            status = "🧬" if a.evolved else "❌" if a.review and a.review.final_verdict == Verdict.REJECT else "🔄"
+            review_info = ""
+            if a.review:
+                review_info = f" [{a.review.approval_score:.0%}, {a.review.final_verdict.value}]"
+            lines.append(f"- {status} {a.gap.domain}: {a.gap.description}{review_info}")
+            if a.error:
+                lines.append(f"  错误: {a.error}")
         return "\n".join(lines)
 
 
-class SelfImprover:
+class SelfEvolver:
     """
-    自我改进器
+    自我进化器
 
     用法:
-        improver = SelfImprover(project_root="/root/maxbot")
-        result = improver.run(llm_client)
+        evolver = SelfEvolver(project_root="/root/maxbot")
+        result = evolver.evolve(llm_client, knowledge_repos=["/path/to/repo"])
     """
 
-    def __init__(self, project_root: str | Path):
+    def __init__(
+        self,
+        project_root: str | Path,
+        tool_registry: Any = None,
+        skill_manager: Any = None,
+    ):
         self.root = Path(project_root)
-        self._history_file = self.root / ".maxbot_improvements.jsonl"
+        self._registry = tool_registry
+        self._skill_manager = skill_manager
+        self._skill_factory = SkillFactory(
+            output_dir=self.root / ".maxbot_absorbed_skills"
+        )
+        self._auto_register = AutoRegister(tool_registry=tool_registry)
+        self._history_file = self.root / ".maxbot_evolution.jsonl"
 
-    def run(
+    def evolve(
         self,
         llm_client: Any,
         model: str = "gpt-4o-mini",
-        test_cmd: str = "python -m pytest tests/ -q --tb=short",
-        auto_apply: bool = True,
-        max_fixes: int = 5,
-        focus: str | None = None,
-    ) -> ImprovementResult:
+        knowledge_repos: list[str] | None = None,
+        max_evolutions: int = 3,
+        approval_threshold: float = 0.6,
+        quorum: int = 3,
+        failure_history: list[dict] | None = None,
+        user_patterns: list[dict] | None = None,
+    ) -> EvolutionResult:
         """
-        执行一轮自我改进
+        执行一轮进化
 
         Args:
             llm_client: LLM 客户端
             model: 模型
-            test_cmd: 测试命令
-            auto_apply: 是否自动应用（False 则只报告）
-            max_fixes: 单轮最大修复数
-            focus: 聚焦维度
+            knowledge_repos: 可吸收的知识源（本地仓库路径列表）
+            max_evolutions: 单轮最大进化数
+            approval_threshold: 审批通过分数阈值
+            quorum: 最少通过票数
+            failure_history: 任务失败历史
+            user_patterns: 用户交互模式
         """
         start = time.time()
-        result = ImprovementResult(project_root=str(self.root))
+        result = EvolutionResult()
 
-        # 1. 分析
-        result.report = analyze_self(self.root, llm_client, model, focus=focus)
-        if not result.report.issues:
+        # 1. 自我评估
+        result.assessment = assess(
+            tool_registry=self._registry,
+            skill_manager=self._skill_manager,
+            failure_history=failure_history,
+            user_patterns=user_patterns,
+            llm_client=llm_client,
+            model=model,
+        )
+
+        if not result.assessment.gaps:
             result.total_elapsed = time.time() - start
             return result
 
-        # 2. 确保当前状态可回滚（需要 git clean state）
-        if not self._is_git_clean():
-            result.total_elapsed = time.time() - start
-            return result
+        # 2. 审批委员会
+        board = ReviewBoard(
+            llm_client=llm_client,
+            model=model,
+            quorum=quorum,
+            approval_threshold=approval_threshold,
+        )
 
-        # 3. 逐个尝试修复
-        for issue in result.report.issues[:max_fixes]:
-            attempt = self._try_fix_issue(issue, llm_client, model, test_cmd, auto_apply)
+        # 3. 逐个缺口尝试进化
+        repos = knowledge_repos or []
+        for gap in result.assessment.top_gaps(max_evolutions):
+            attempt = self._evolve_gap(gap, board, repos, llm_client, model)
             result.attempts.append(attempt)
 
         result.total_elapsed = time.time() - start
-
-        # 4. 记录历史
         self._save_history(result)
 
         return result
 
-    def run_single(
+    def evolve_single_gap(
         self,
-        issue: Issue,
+        gap: CapabilityGap,
+        knowledge_repo: str | Path,
         llm_client: Any,
         model: str = "gpt-4o-mini",
-        test_cmd: str = "python -m pytest tests/ -q --tb=short",
-    ) -> ImprovementAttempt:
-        """修复单个问题"""
-        return self._try_fix_issue(issue, llm_client, model, test_cmd, auto_apply=True)
+        approval_threshold: float = 0.6,
+    ) -> EvolutionAttempt:
+        """进化单个缺口"""
+        board = ReviewBoard(
+            llm_client=llm_client,
+            model=model,
+            approval_threshold=approval_threshold,
+        )
+        return self._evolve_gap(gap, board, [str(knowledge_repo)], llm_client, model)
 
-    def _try_fix_issue(
+    def _evolve_gap(
         self,
-        issue: Issue,
+        gap: CapabilityGap,
+        board: ReviewBoard,
+        repos: list[str],
         llm_client: Any,
         model: str,
-        test_cmd: str,
-        auto_apply: bool,
-    ) -> ImprovementAttempt:
-        """尝试修复单个问题"""
+    ) -> EvolutionAttempt:
+        """尝试填补单个能力缺口"""
         start = time.time()
-        attempt = ImprovementAttempt(issue=issue)
+        attempt = EvolutionAttempt(gap=gap)
 
         try:
-            # 生成补丁
-            attempt.patch = generate_patch(issue, self.root, llm_client, model)
-            if not attempt.patch.is_valid():
-                attempt.error = "未生成有效补丁"
+            # Step 1: 找到合适的知识源
+            source_repo = self._find_knowledge_source(gap, repos)
+            if not source_repo:
+                attempt.error = f"未找到匹配的知识源（需要: {gap.domain}）"
                 attempt.elapsed = time.time() - start
                 return attempt
 
-            # 验证补丁
-            can_apply, reason = validate_patch(attempt.patch, self.root)
-            if not can_apply:
-                attempt.error = f"补丁验证失败: {reason}"
+            attempt.absorbed_from = source_repo
+
+            # Step 2: 吸收知识
+            attempt.capabilities = extract_from_repo(source_repo)
+            if not attempt.capabilities:
+                attempt.error = "知识源未提取到可用能力"
                 attempt.elapsed = time.time() - start
                 return attempt
 
-            if not auto_apply:
-                attempt.elapsed = time.time() - start
-                return attempt
+            # Step 3: 安全验证
+            attempt.validations = batch_validate(attempt.capabilities)
 
-            # 应用补丁
-            applied = self._apply_patch(attempt.patch)
-            if not applied:
-                attempt.error = "补丁应用失败"
-                attempt.elapsed = time.time() - start
-                return attempt
-            attempt.applied = True
+            # Step 4: 构建提案，提交审批委员会
+            proposal = self._build_proposal(gap, attempt)
+            attempt.review = board.review(proposal)
 
-            # 跑测试
-            passed, output = self._run_tests(test_cmd)
-            attempt.test_passed = passed
-            attempt.test_output = output
+            # Step 5: 根据审批结果决定
+            if attempt.review.final_verdict == Verdict.APPROVE:
+                # 进化！注册为工具
+                attempt.registered = self._auto_register.register_validated(
+                    attempt.validations,
+                    toolset=f"evolved_{gap.domain}",
+                )
+                attempt.evolved = any(r.success for r in attempt.registered)
 
-            if not passed:
-                # 回滚
-                self._rollback()
-                attempt.rolled_back = True
-                attempt.error = f"测试失败，已回滚"
+                # 生成技能
+                valid_caps = [
+                    attempt.capabilities[i]
+                    for i, v in enumerate(attempt.validations)
+                    if v.is_valid and i < len(attempt.capabilities)
+                ]
+                if valid_caps:
+                    self._skill_factory.generate(valid_caps)
+
+            elif attempt.review.final_verdict == Verdict.REVISE:
+                attempt.error = "委员会要求修改，暂不自动修订"
 
         except Exception as e:
             attempt.error = str(e)
-            if attempt.applied:
-                self._rollback()
-                attempt.rolled_back = True
 
         attempt.elapsed = time.time() - start
         return attempt
 
-    def _is_git_clean(self) -> bool:
-        """检查 git 工作区是否干净"""
-        try:
-            result = subprocess.run(
-                ["git", "status", "--porcelain"],
-                cwd=str(self.root),
-                capture_output=True,
-                text=True,
-                timeout=5,
-            )
-            return result.returncode == 0 and not result.stdout.strip()
-        except Exception:
-            return False
+    def _find_knowledge_source(
+        self,
+        gap: CapabilityGap,
+        repos: list[str],
+    ) -> str | None:
+        """为缺口找到合适的知识源"""
+        if not repos:
+            return None
 
-    def _apply_patch(self, patch: Patch) -> bool:
-        """应用补丁"""
-        import tempfile
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".patch", delete=False) as f:
-            f.write(patch.diff)
-            patch_file = f.name
+        # 如果缺口有建议方案，尝试匹配
+        suggestion = gap.suggested_solution.lower()
+        domain = gap.domain.lower()
 
-        try:
-            result = subprocess.run(
-                ["git", "apply", patch_file],
-                cwd=str(self.root),
-                capture_output=True,
-                text=True,
-                timeout=10,
-            )
-            return result.returncode == 0
-        except Exception:
-            return False
-        finally:
-            Path(patch_file).unlink(missing_ok=True)
+        for repo in repos:
+            repo_lower = repo.lower()
+            # 简单关键词匹配
+            if domain in repo_lower or any(
+                kw in repo_lower for kw in domain.split("_")
+            ):
+                return repo
+            if suggestion and any(
+                kw in repo_lower for kw in suggestion.split()[:3]
+            ):
+                return repo
 
-    def _rollback(self) -> bool:
-        """回滚所有未提交的更改"""
-        try:
-            subprocess.run(
-                ["git", "checkout", "--", "."],
-                cwd=str(self.root),
-                capture_output=True,
-                timeout=10,
-            )
-            subprocess.run(
-                ["git", "clean", "-fd"],
-                cwd=str(self.root),
-                capture_output=True,
-                timeout=10,
-            )
-            return True
-        except Exception:
-            return False
+        # 没有精确匹配，返回第一个（让 LLM 决定吸收什么）
+        return repos[0] if repos else None
 
-    def _run_tests(self, test_cmd: str) -> tuple[bool, str]:
-        """运行测试"""
-        try:
-            result = subprocess.run(
-                test_cmd.split(),
-                cwd=str(self.root),
-                capture_output=True,
-                text=True,
-                timeout=120,
-            )
-            output = result.stdout + result.stderr
-            passed = result.returncode == 0
-            return passed, output[-2000:]  # 只保留最后 2000 字符
-        except subprocess.TimeoutExpired:
-            return False, "测试超时 (120s)"
-        except Exception as e:
-            return False, str(e)
+    def _build_proposal(
+        self,
+        gap: CapabilityGap,
+        attempt: EvolutionAttempt,
+    ) -> dict[str, Any]:
+        """构建审批提案"""
+        changes = []
+        new_capabilities = []
 
-    def _save_history(self, result: ImprovementResult):
-        """追加改进历史"""
-        try:
-            with open(self._history_file, "a") as f:
-                for attempt in result.attempts:
-                    record = {
-                        "timestamp": time.time(),
-                        "issue": attempt.issue.title,
-                        "category": attempt.issue.category,
-                        "applied": attempt.applied,
-                        "test_passed": attempt.test_passed,
-                        "rolled_back": attempt.rolled_back,
-                        "error": attempt.error,
-                        "elapsed": round(attempt.elapsed, 2),
-                    }
-                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
-        except Exception:
-            pass
+        for cap in attempt.capabilities[:5]:  # 最多展示 5 个
+            changes.append({
+                "file": cap.source_file,
+                "description": f"吸收 {cap.source_function}: {cap.description}",
+                "new_code": cap.handler_code[:500] if cap.handler_code else "",
+            })
+            new_capabilities.append(f"{cap.name}: {cap.description}")
+
+        # 测试结果
+        test_results = {
+            "passed": sum(1 for v in attempt.validations if v.is_valid),
+            "failed": sum(1 for v in attempt.validations if not v.is_valid),
+            "output": "\n".join(
+                v.test_output[:200]
+                for v in attempt.validations
+                if v.test_output
+            )[:1000],
+        }
+
+        return {
+            "gap": gap,
+            "changes": changes,
+            "new_capabilities": new_capabilities,
+            "test_results": test_results,
+        }
 
     def get_history(self) -> list[dict]:
-        """读取改进历史"""
+        """读取进化历史"""
         if not self._history_file.exists():
             return []
         records = []
@@ -302,3 +322,24 @@ class SelfImprover:
                 except Exception:
                     pass
         return records
+
+    def _save_history(self, result: EvolutionResult):
+        """追加进化历史"""
+        try:
+            with open(self._history_file, "a") as f:
+                for attempt in result.attempts:
+                    record = {
+                        "timestamp": time.time(),
+                        "gap_domain": attempt.gap.domain,
+                        "gap_description": attempt.gap.description,
+                        "absorbed_from": attempt.absorbed_from,
+                        "capabilities_count": len(attempt.capabilities),
+                        "review_score": attempt.review.approval_score if attempt.review else 0,
+                        "review_verdict": attempt.review.final_verdict.value if attempt.review else "none",
+                        "evolved": attempt.evolved,
+                        "error": attempt.error,
+                        "elapsed": round(attempt.elapsed, 2),
+                    }
+                    f.write(json.dumps(record, ensure_ascii=False) + "\n")
+        except Exception:
+            pass

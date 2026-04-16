@@ -23,11 +23,12 @@ class ToolDef:
     """工具定义"""
     name: str
     description: str
-    parameters: dict[str, Any]          # JSON Schema
+    parameters: dict[str, Any]          # JSON Schema properties
     handler: Callable[..., str]
     toolset: str = "builtin"
     requires_env: list[str] = field(default_factory=list)
     tags: list[str] = field(default_factory=list)
+    required_params: list[str] = field(default_factory=list)
 
     def to_schema(self) -> dict:
         """转成 OpenAI function calling 格式"""
@@ -39,7 +40,7 @@ class ToolDef:
                 "parameters": {
                     "type": "object",
                     "properties": self.parameters,
-                    "required": list(self.parameters.keys()),
+                    "required": self.required_params or list(self.parameters.keys()),
                 },
             },
         }
@@ -70,6 +71,7 @@ class ToolRegistry:
         toolset: str = "builtin",
         requires_env: list[str] | None = None,
         tags: list[str] | None = None,
+        required_params: list[str] | None = None,
     ) -> ToolDef:
         """注册一个工具"""
         tool = ToolDef(
@@ -80,6 +82,7 @@ class ToolRegistry:
             toolset=toolset,
             requires_env=requires_env or [],
             tags=tags or [],
+            required_params=required_params or [],
         )
         self._tools[name] = tool
         return tool
@@ -111,7 +114,7 @@ class ToolRegistry:
         def decorator(func: Callable) -> Callable:
             tool_name = name or func.__name__
             tool_desc = description or inspect.getdoc(func) or f"Tool: {tool_name}"
-            params = _extract_params(func)
+            params, required = _extract_params(func)
             self.register(
                 name=tool_name,
                 description=tool_desc,
@@ -119,6 +122,7 @@ class ToolRegistry:
                 handler=func,
                 toolset=toolset,
                 tags=tags,
+                required_params=required,
             )
             return func
         return decorator
@@ -214,6 +218,7 @@ def _extract_params(func: Callable) -> dict[str, Any]:
     """从函数签名提取 JSON Schema 参数"""
     sig = inspect.signature(func)
     params: dict[str, Any] = {}
+    required: list[str] = []
     type_map = {
         str: "string",
         int: "integer",
@@ -229,5 +234,7 @@ def _extract_params(func: Callable) -> dict[str, Any]:
         p: dict[str, Any] = {"type": ptype}
         if param.default is not inspect.Parameter.empty:
             p["default"] = param.default
+        else:
+            required.append(name)
         params[name] = p
-    return params
+    return params, required

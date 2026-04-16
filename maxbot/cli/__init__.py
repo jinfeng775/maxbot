@@ -6,10 +6,23 @@ import argparse
 import json
 import os
 import sys
+from pathlib import Path
 
 from maxbot import __version__
 from maxbot.core import Agent, AgentConfig
 from maxbot.tools import registry
+
+
+def load_env_file():
+    """从 ~/.maxbot/.env 加载环境变量"""
+    env_path = Path.home() / ".maxbot" / ".env"
+    if not env_path.exists():
+        return
+    for line in env_path.read_text().splitlines():
+        line = line.strip()
+        if line and not line.startswith("#") and "=" in line:
+            key, _, value = line.partition("=")
+            os.environ.setdefault(key.strip(), value.strip())
 
 
 def main():
@@ -18,30 +31,37 @@ def main():
         description="MaxBot — 自我学习、自我构建的超级智能体",
     )
     parser.add_argument("--version", action="version", version=f"maxbot {__version__}")
-    parser.add_argument("-m", "--model", default=None, help="模型名称 (默认: gpt-4o)")
+    parser.add_argument("-m", "--model", default=None, help="模型名称")
     parser.add_argument("--provider", default=None, help="提供商: openai | anthropic")
     parser.add_argument("--base-url", default=None, help="API base URL (兼容接口)")
     parser.add_argument("--api-key", default=None, help="API Key")
     parser.add_argument("--max-iter", type=int, default=50, help="最大迭代次数")
+    parser.add_argument("--no-tools", action="store_true", help="禁用所有工具")
+    parser.add_argument("--system", default=None, help="自定义 system prompt")
     parser.add_argument("message", nargs="?", help="直接发送消息（非交互模式）")
 
     args = parser.parse_args()
 
+    # 加载环境变量
+    load_env_file()
+
     # 构建配置
     config = AgentConfig(
-        model=args.model or os.getenv("MAXBOT_MODEL", "gpt-4o"),
+        model=args.model or os.getenv("MAXBOT_MODEL", "mimo-v2-pro"),
         base_url=args.base_url or os.getenv("MAXBOT_BASE_URL"),
-        api_key=args.api_key or os.getenv("OPENAI_API_KEY") or os.getenv("ANTHROPIC_API_KEY"),
+        api_key=args.api_key or os.getenv("MAXBOT_API_KEY"),
         max_iterations=args.max_iter,
     )
-
+    if args.system:
+        config.system_prompt = args.system
     if args.provider:
         config.provider = args.provider
 
     # 确保内置工具加载
-    from maxbot.tools import registry as _r  # noqa: F811 — 触发导入
+    from maxbot.tools import registry as _r  # noqa: F811
 
-    agent = Agent(config=config, registry=registry)
+    tool_registry = registry if not args.no_tools else type(registry)()
+    agent = Agent(config=config, registry=tool_registry)
 
     # 设置回调（终端输出）
     def on_tool_start(name, args):
@@ -54,8 +74,12 @@ def main():
         preview = result[:100] if isinstance(result, str) else str(result)[:100]
         print(f"  ✅ → {preview}")
 
+    def on_compress(count):
+        print(f"  📦 上下文已压缩 ({count} 条消息 → 摘要)")
+
     agent.on_tool_start = on_tool_start
     agent.on_tool_end = on_tool_end
+    agent.on_compress = on_compress
 
     # 非交互模式
     if args.message:
@@ -64,9 +88,13 @@ def main():
         return
 
     # 交互模式
-    print(f"🤖 MaxBot v{__version__} — 模型: {config.model}")
-    print(f"📦 已加载 {len(registry)} 个工具")
-    print("输入消息开始对话，/quit 退出\n")
+    print(f"🤖 MaxBot v{__version__}")
+    print(f"   模型: {config.model}")
+    print(f"   工具: {len(tool_registry)} 个")
+    print()
+    print("  输入消息开始对话")
+    print("  /help 查看命令 | /quit 退出")
+    print()
 
     while True:
         try:
@@ -78,25 +106,69 @@ def main():
         if not user_input:
             continue
 
+        # 命令处理
         if user_input in ("/quit", "/exit", "/q"):
             print("再见！")
             break
 
+        if user_input == "/help":
+            print("""
+  命令列表:
+    /help          显示此帮助
+    /tools         列出所有可用工具
+    /reset         重置对话历史
+    /stats         显示会话统计
+    /history       显示对话历史摘要
+    /model <name>  切换模型
+    /quit          退出
+            """)
+            continue
+
         if user_input == "/tools":
-            print(f"\n📦 已注册工具 ({len(registry)} 个):")
-            for t in registry.list_tools():
-                print(f"  - {t.name}: {t.description[:60]}")
+            print(f"\n  已注册工具 ({len(tool_registry)} 个):")
+            for t in tool_registry.list_tools():
+                desc = t.description[:50] + ("..." if len(t.description) > 50 else "")
+                print(f"    • {t.name}: {desc}")
             print()
             continue
 
         if user_input == "/reset":
             agent.reset()
-            print("🔄 对话已重置\n")
+            print("  🔄 对话已重置\n")
             continue
 
-        print("🤔 思考中...")
+        if user_input == "/stats":
+            stats = agent.get_stats()
+            print(f"\n  📊 会话统计:")
+            print(f"    总消息数: {stats['total_messages']}")
+            print(f"    Token 使用: {stats['total_tokens_used']}")
+            for role, count in stats["roles"].items():
+                if count > 0:
+                    print(f"    {role}: {count}")
+            print()
+            continue
+
+        if user_input == "/history":
+            history = agent.get_history()
+            print(f"\n  📜 对话历史 ({len(history)} 条):")
+            for i, m in enumerate(history[-10:], 1):
+                role = m["role"]
+                content = str(m.get("content", ""))[:60]
+                print(f"    {i}. [{role}] {content}")
+            print()
+            continue
+
+        if user_input.startswith("/model "):
+            new_model = user_input[7:].strip()
+            config.model = new_model
+            agent._client = None  # 重建客户端
+            print(f"  模型已切换: {new_model}\n")
+            continue
+
+        # 普通对话
+        print("  🤔 思考中...")
         response = agent.chat(user_input)
-        print(f"\n🤖 {response}\n")
+        print(f"\n  🤖 {response}\n")
 
 
 if __name__ == "__main__":

@@ -1,7 +1,7 @@
 """
-Telegram Bot 渠道适配器
+Telegram Bot 渠道适配器 — 使用 aiohttp 异步轮询
 
-通过 Telegram Bot API 收发消息。
+通过 Telegram Bot API 收发消息，不阻塞事件循环。
 """
 
 from __future__ import annotations
@@ -9,8 +9,13 @@ from __future__ import annotations
 import asyncio
 import json
 import os
-import urllib.request
 from typing import AsyncIterator
+
+try:
+    import aiohttp
+    AIOHTTP_AVAILABLE = True
+except ImportError:
+    AIOHTTP_AVAILABLE = False
 
 from maxbot.gateway.channels.base import (
     ChannelAdapter,
@@ -31,12 +36,16 @@ class TelegramChannel(ChannelAdapter):
     """
 
     def __init__(self, bot_token: str | None = None):
+        if not AIOHTTP_AVAILABLE:
+            raise ImportError("需要安装 aiohttp: pip install aiohttp")
+
         self._token = bot_token or os.getenv("TELEGRAM_BOT_TOKEN", "")
         self._api_base = f"https://api.telegram.org/bot{self._token}"
         self._connected = False
         self._offset = 0
         self._poll_task: asyncio.Task | None = None
         self._message_queue: asyncio.Queue[InboundMessage] = asyncio.Queue()
+        self._session: aiohttp.ClientSession | None = None
 
     @property
     def name(self) -> str:
@@ -53,6 +62,7 @@ class TelegramChannel(ChannelAdapter):
     async def connect(self) -> bool:
         if not self._token:
             raise ValueError("Telegram bot token 未设置")
+        self._session = aiohttp.ClientSession()
         self._connected = True
         # 启动轮询
         self._poll_task = asyncio.create_task(self._poll_loop())
@@ -62,6 +72,12 @@ class TelegramChannel(ChannelAdapter):
         self._connected = False
         if self._poll_task:
             self._poll_task.cancel()
+            try:
+                await self._poll_task
+            except asyncio.CancelledError:
+                pass
+        if self._session:
+            await self._session.close()
 
     async def send_message(self, message: OutboundMessage) -> bool:
         url = f"{self._api_base}/sendMessage"
@@ -73,13 +89,8 @@ class TelegramChannel(ChannelAdapter):
             payload["reply_to_message_id"] = message.reply_to
 
         try:
-            req = urllib.request.Request(
-                url,
-                data=json.dumps(payload).encode(),
-                headers={"Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=10) as resp:
-                result = json.loads(resp.read())
+            async with self._session.post(url, json=payload) as resp:
+                result = await resp.json()
                 return result.get("ok", False)
         except Exception as e:
             print(f"❌ Telegram 发送失败: {e}")
@@ -94,13 +105,13 @@ class TelegramChannel(ChannelAdapter):
                 continue
 
     async def _poll_loop(self):
-        """长轮询接收消息"""
+        """长轮询接收消息（异步，不阻塞）"""
         while self._connected:
             try:
-                url = f"{self._api_base}/getUpdates?offset={self._offset}&timeout=30"
-                req = urllib.request.Request(url)
-                with urllib.request.urlopen(req, timeout=35) as resp:
-                    data = json.loads(resp.read())
+                url = f"{self._api_base}/getUpdates"
+                params = {"offset": self._offset, "timeout": 30}
+                async with self._session.get(url, params=params, timeout=aiohttp.ClientTimeout(total=35)) as resp:
+                    data = await resp.json()
 
                 if data.get("ok"):
                     for update in data.get("result", []):
@@ -109,6 +120,8 @@ class TelegramChannel(ChannelAdapter):
                         if msg:
                             await self._message_queue.put(msg)
 
+            except asyncio.CancelledError:
+                break
             except Exception as e:
                 if self._connected:
                     print(f"⚠️ Telegram 轮询错误: {e}")

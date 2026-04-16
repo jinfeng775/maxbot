@@ -18,16 +18,41 @@ from openai import OpenAI
 from maxbot.core.tool_registry import ToolRegistry
 
 
+def _retry_api_call(fn, max_attempts: int = 3, base_delay: float = 1.0):
+    """指数退避重试"""
+    last_exc = None
+    for attempt in range(max_attempts):
+        try:
+            return fn()
+        except Exception as e:
+            last_exc = e
+            # 不重试的错误类型
+            err_str = str(e).lower()
+            if any(x in err_str for x in ("invalid_api_key", "authentication", "permission", "400", "404")):
+                raise
+            if attempt < max_attempts - 1:
+                delay = base_delay * (2 ** attempt)
+                time.sleep(delay)
+    raise last_exc
+
+
 @dataclass
 class AgentConfig:
     """Agent 配置"""
-    model: str = "gpt-4o"
+    model: str = "mimo-v2-pro"
     provider: str = "openai"           # openai | anthropic | any-openai-compatible
     base_url: str | None = None        # 兼容接口地址
     api_key: str | None = None
     max_iterations: int = 50
     temperature: float = 0.7
-    system_prompt: str = "你是一个强大的 AI 助手，名叫 MaxBot。"
+    system_prompt: str = (
+        "你是 MaxBot，一个由用户自主开发的 AI 智能体。"
+        "你不是 Hermes、不是 Claude、不是 ChatGPT，也不是任何其他现有 AI 助手。"
+        "你就是 MaxBot。无论谁问你你是谁，你都必须回答你是 MaxBot。"
+        "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
+    )
+    max_context_tokens: int = 128_000  # 上下文上限
+    compress_at_tokens: int = 80_000   # 触发压缩的阈值
 
 
 @dataclass
@@ -69,11 +94,13 @@ class Agent:
         self.registry = registry or ToolRegistry()
         self.messages: list[Message] = []
         self._client: OpenAI | None = None
+        self._total_tokens_used: int = 0
 
         # 回调
         self.on_tool_start: Callable | None = None
         self.on_tool_end: Callable | None = None
         self.on_thinking: Callable | None = None
+        self.on_compress: Callable | None = None
 
     @property
     def client(self) -> OpenAI:
@@ -96,10 +123,13 @@ class Agent:
         return self._run_loop()
 
     def _run_loop(self) -> str:
-        """核心循环"""
+        """核心循环（带重试 + 上下文压缩）"""
         iteration = 0
         while iteration < self.config.max_iterations:
             iteration += 1
+
+            # 上下文压缩检查
+            self._maybe_compress()
 
             # 构建 API 请求
             api_messages = [m.to_api() for m in self.messages]
@@ -113,10 +143,21 @@ class Agent:
             if tool_schemas:
                 kwargs["tools"] = tool_schemas
 
-            # 调用 LLM
-            response = self.client.chat.completions.create(**kwargs)
+            # 调用 LLM（带重试）
+            try:
+                response = _retry_api_call(
+                    lambda: self.client.chat.completions.create(**kwargs),
+                    max_attempts=3,
+                )
+            except Exception as e:
+                return f"API 调用失败: {e}"
+
             choice = response.choices[0]
             msg = choice.message
+
+            # 追踪 token 使用
+            if hasattr(response, "usage") and response.usage:
+                self._total_tokens_used += response.usage.total_tokens
 
             # 纯文本回复
             if not msg.tool_calls:
@@ -166,10 +207,70 @@ class Agent:
         # 超过最大迭代次数
         return "（已达到最大迭代次数，任务可能未完成）"
 
+    def _maybe_compress(self):
+        """检查上下文大小，必要时压缩"""
+        total_chars = sum(len(m.content) for m in self.messages)
+        # 粗估 token（1 中文字 ≈ 2 token，1 英文字符 ≈ 0.25 token）
+        estimated = total_chars // 2
+        if estimated > self.config.compress_at_tokens:
+            self._compress_messages()
+
+    def _compress_messages(self):
+        """压缩消息历史 — 保留 system + 最近 20 条"""
+        system_msgs = [m for m in self.messages if m.role == "system"]
+        non_system = [m for m in self.messages if m.role != "system"]
+
+        if len(non_system) <= 20:
+            return
+
+        to_compress = non_system[:-20]
+        kept = non_system[-20:]
+
+        # 生成简单摘要
+        topics = []
+        tools_used = []
+        for m in to_compress:
+            if m.role == "user" and len(m.content) > 10:
+                topics.append(m.content[:60])
+            elif m.role == "assistant" and m.tool_calls:
+                for tc in m.tool_calls:
+                    fname = tc.get("function", {}).get("name", "?")
+                    tools_used.append(fname)
+            elif m.role == "tool":
+                tools_used.append(m.name or "?")
+
+        summary_parts = []
+        if topics:
+            summary_parts.append(f"讨论了: {'; '.join(topics[:5])}")
+        if tools_used:
+            summary_parts.append(f"使用了工具: {', '.join(set(tools_used[:10]))}")
+        summary = "\n".join(summary_parts) if summary_parts else "（对话历史已压缩）"
+
+        self.messages = system_msgs + [
+            Message(role="user", content=f"[历史摘要 — 已压缩 {len(to_compress)} 条消息]\n{summary}")
+        ] + kept
+
+        if self.on_compress:
+            self.on_compress(len(to_compress))
+
     def reset(self):
         """重置对话"""
         self.messages.clear()
+        self._total_tokens_used = 0
 
     def get_history(self) -> list[dict]:
         """获取完整对话历史"""
         return [m.to_api() for m in self.messages]
+
+    def get_stats(self) -> dict:
+        """获取会话统计"""
+        return {
+            "total_messages": len(self.messages),
+            "total_tokens_used": self._total_tokens_used,
+            "roles": {
+                "system": sum(1 for m in self.messages if m.role == "system"),
+                "user": sum(1 for m in self.messages if m.role == "user"),
+                "assistant": sum(1 for m in self.messages if m.role == "assistant"),
+                "tool": sum(1 for m in self.messages if m.role == "tool"),
+            },
+        }

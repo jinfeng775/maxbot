@@ -10,5 +10,6 @@ from maxbot.tools import web_tools    # noqa: F401
 from maxbot.tools import code_editor  # noqa: F401
 from maxbot.tools import notebook_tools  # noqa: F401
 from maxbot.tools import code_analysis   # noqa: F401
+from maxbot.tools import multi_agent_tools  # noqa: F401
 
 __all__ = ["registry"]

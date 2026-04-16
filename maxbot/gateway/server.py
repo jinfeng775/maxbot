@@ -8,14 +8,17 @@ Gateway 服务 — HTTP/WebSocket API
 - WebSocket：实时对话
 - 多渠道消息路由
 - 认证（API Key + JWT）
+- Session 持久化（SQLite）
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
+import threading
 import time
 import uuid
+from collections import OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -26,10 +29,9 @@ from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 import uvicorn
 
-from maxbot.core.agent_loop import Agent, AgentConfig
+from maxbot.core.agent_loop import Agent, AgentConfig, Message
 from maxbot.core.tool_registry import ToolRegistry
 from maxbot.core.memory import Memory
-from maxbot.tools import registry as builtin_registry
 
 
 # ── 数据模型 ──────────────────────────────────────────────
@@ -71,14 +73,15 @@ class GatewayConfig(BaseModel):
     host: str = "0.0.0.0"
     port: int = 8765
     api_keys: list[str] = Field(default_factory=list)  # 允许的 API Key
-    default_model: str = "gpt-4o"
+    default_model: str = "mimo-v2-pro"
     default_base_url: str | None = None
     default_api_key: str | None = None
     max_sessions: int = 100
     cors_origins: list[str] = ["*"]
+    session_db_path: str | None = None  # None = 内存模式，否则 SQLite 路径
 
 
-# ── 会话管理 ──────────────────────────────────────────────
+# ── 会话管理（线程安全）─────────────────────────────────
 
 @dataclass
 class Session:
@@ -90,64 +93,140 @@ class Session:
 
 
 class SessionManager:
-    """管理多个 Agent 会话"""
+    """管理多个 Agent 会话（线程安全 + 可选持久化）"""
 
     def __init__(self, config: GatewayConfig, registry: ToolRegistry):
         self.config = config
         self.registry = registry
-        self.sessions: dict[str, Session] = {}
+        self._sessions: OrderedDict[str, Session] = OrderedDict()
+        self._lock = threading.Lock()
+
+        # 可选 SQLite 持久化
+        self._db_conn = None
+        if config.session_db_path:
+            self._init_persistence(config.session_db_path)
+
+    def _init_persistence(self, db_path: str):
+        """初始化 SQLite 持久化"""
+        import sqlite3
+        path = Path(db_path)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        self._db_conn = sqlite3.connect(str(path), check_same_thread=False)
+        self._db_conn.row_factory = sqlite3.Row
+        self._db_conn.executescript("""
+            CREATE TABLE IF NOT EXISTS sessions (
+                session_id TEXT PRIMARY KEY,
+                created_at REAL,
+                last_active REAL,
+                message_count INTEGER DEFAULT 0,
+                messages TEXT DEFAULT '[]'
+            );
+        """)
+        self._db_conn.commit()
 
     def get_or_create(
         self,
         session_id: str | None = None,
         model: str | None = None,
     ) -> Session:
-        if session_id and session_id in self.sessions:
-            session = self.sessions[session_id]
-            session.last_active = time.time()
+        with self._lock:
+            if session_id and session_id in self._sessions:
+                session = self._sessions[session_id]
+                session.last_active = time.time()
+                # 移动到末尾（LRU）
+                self._sessions.move_to_end(session_id)
+                return session
+
+            # 创建新会话
+            sid = session_id or str(uuid.uuid4())[:12]
+            agent_config = AgentConfig(
+                model=model or self.config.default_model,
+                base_url=self.config.default_base_url,
+                api_key=self.config.default_api_key,
+            )
+            agent = Agent(config=agent_config, registry=self.registry)
+
+            # 从数据库恢复历史（如果有）
+            if self._db_conn:
+                row = self._db_conn.execute(
+                    "SELECT messages FROM sessions WHERE session_id = ?", (sid,)
+                ).fetchone()
+                if row:
+                    try:
+                        saved_msgs = json.loads(row["messages"])
+                        # 恢复消息（保持 OpenAI API 格式，在 Agent 内部存储）
+                        for m in saved_msgs:
+                            restored = Message(
+                                role=m.get("role", "user"),
+                                content=m.get("content", ""),
+                                tool_calls=m.get("tool_calls", []),
+                                tool_call_id=m.get("tool_call_id"),
+                                name=m.get("name"),
+                            )
+                            agent.messages.append(restored)
+                    except Exception:
+                        pass
+
+            session = Session(session_id=sid, agent=agent)
+            self._sessions[sid] = session
+            self._cleanup()
             return session
 
-        # 创建新会话
-        sid = session_id or str(uuid.uuid4())[:12]
-        agent_config = AgentConfig(
-            model=model or self.config.default_model,
-            base_url=self.config.default_base_url,
-            api_key=self.config.default_api_key,
-        )
-        agent = Agent(config=agent_config, registry=self.registry)
-        session = Session(session_id=sid, agent=agent)
-        self.sessions[sid] = session
-
-        # 清理过期会话
-        self._cleanup()
-
-        return session
-
     def _cleanup(self):
-        if len(self.sessions) <= self.config.max_sessions:
+        """清理最旧的会话"""
+        if len(self._sessions) <= self.config.max_sessions:
             return
-        # 删除最旧的
-        sorted_sessions = sorted(self.sessions.items(), key=lambda x: x[1].last_active)
-        to_remove = len(self.sessions) - self.config.max_sessions
-        for sid, _ in sorted_sessions[:to_remove]:
-            del self.sessions[sid]
+        to_remove = len(self._sessions) - self.config.max_sessions
+        for _ in range(to_remove):
+            sid, session = self._sessions.popitem(last=False)
+            # 持久化到数据库
+            self._persist_session(session)
+
+    def _persist_session(self, session: Session):
+        """保存会话到数据库"""
+        if not self._db_conn:
+            return
+        try:
+            msgs_json = json.dumps(
+                [m.to_api() if hasattr(m, "to_api") else m for m in session.agent.messages],
+                ensure_ascii=False,
+            )
+            self._db_conn.execute("""
+                INSERT OR REPLACE INTO sessions (session_id, created_at, last_active, message_count, messages)
+                VALUES (?, ?, ?, ?, ?)
+            """, (session.session_id, session.created_at, session.last_active, session.message_count, msgs_json))
+            self._db_conn.commit()
+        except Exception:
+            pass
+
+    def persist_all(self):
+        """持久化所有会话"""
+        with self._lock:
+            for session in self._sessions.values():
+                self._persist_session(session)
 
     def list_sessions(self) -> list[SessionInfo]:
-        return [
-            SessionInfo(
-                session_id=s.session_id,
-                created_at=s.created_at,
-                message_count=s.message_count,
-                last_active=s.last_active,
-            )
-            for s in self.sessions.values()
-        ]
+        with self._lock:
+            return [
+                SessionInfo(
+                    session_id=s.session_id,
+                    created_at=s.created_at,
+                    message_count=s.message_count,
+                    last_active=s.last_active,
+                )
+                for s in self._sessions.values()
+            ]
 
     def delete_session(self, session_id: str) -> bool:
-        if session_id in self.sessions:
-            del self.sessions[session_id]
-            return True
-        return False
+        with self._lock:
+            if session_id in self._sessions:
+                session = self._sessions.pop(session_id)
+                self._persist_session(session)
+                return True
+            return False
+
+    def __len__(self) -> int:
+        return len(self._sessions)
 
 
 # ── Gateway 服务 ──────────────────────────────────────────
@@ -167,7 +246,7 @@ class GatewayServer:
         registry: ToolRegistry | None = None,
     ):
         self.config = config or GatewayConfig()
-        self.registry = registry or builtin_registry
+        self.registry = registry or ToolRegistry()
         self.session_manager = SessionManager(self.config, self.registry)
         self.app = FastAPI(
             title="MaxBot Gateway",
@@ -177,6 +256,10 @@ class GatewayServer:
         self._ws_connections: dict[str, WebSocket] = {}
         self._setup_middleware()
         self._setup_routes()
+
+        # 进程退出时持久化
+        import atexit
+        atexit.register(self.session_manager.persist_all)
 
     def _setup_middleware(self):
         self.app.add_middleware(
@@ -199,7 +282,7 @@ class GatewayServer:
 
         @self.app.get("/health")
         async def health():
-            return {"status": "ok", "sessions": len(self.session_manager.sessions)}
+            return {"status": "ok", "sessions": len(self.session_manager)}
 
         @self.app.post("/chat", response_model=ChatResponse)
         async def chat(request: ChatRequest, _key: str | None = Depends(self._verify_api_key)):
@@ -276,8 +359,9 @@ class GatewayServer:
                     # 发送"正在处理"状态
                     await websocket.send_json({"type": "status", "status": "thinking"})
 
-                    # 调用 Agent
-                    response = session.agent.chat(user_message)
+                    # 调用 Agent（在线程池中运行同步代码）
+                    loop = asyncio.get_event_loop()
+                    response = await loop.run_in_executor(None, session.agent.chat, user_message)
 
                     # 发送响应
                     await websocket.send_json({
@@ -289,7 +373,7 @@ class GatewayServer:
             except WebSocketDisconnect:
                 self._ws_connections.pop(session_id, None)
 
-        # ── 批量消息（参考 OpenClaw 的消息队列）──────────
+        # ── 批量消息 ─────────────────────────────────────
 
         @self.app.post("/batch")
         async def batch_chat(
@@ -318,8 +402,6 @@ class GatewayServer:
 
     def start_background(self, host: str | None = None, port: int | None = None):
         """后台启动（非阻塞，返回线程）"""
-        import threading
-
         def _run():
             uvicorn.run(
                 self.app,

@@ -328,37 +328,38 @@
 ## Phase 6：自我改进
 
 **状态：✅ 已完成** `2026-04-16`
-**来源：原创（部分参考 Claude Code 的自我修改能力）**
+**来源：原创**
 
-### 6.1 自我代码分析
+### 6.1 自我评估
 - [x] `knowledge/self_analyzer.py`
-  - [x] 读取 MaxBot 自身源码（按优先级选关键文件）
-  - [x] LLM 驱动的问题识别（bug/性能/缺失功能/代码质量/安全）
-  - [x] AnalysisReport 生成（文本报告 + 分类统计）
-  - [x] 聚焦维度支持（focus 参数）
+  - [x] 能力盘点（工具/技能/领域覆盖）
+  - [x] LLM 驱动的能力缺口分析（不是找 bug，是找"不能做什么"）
+  - [x] 支持失败历史、用户模式、对标差距 3 种数据源
+  - [x] CapabilityGap 数据结构（domain/priority/evidence/solution）
 
-### 6.2 补丁生成
-- [x] `knowledge/patch_generator.py`
-  - [x] LLM 生成 unified diff 格式补丁
-  - [x] diff 提取（处理 markdown 包裹）
-  - [x] 多文件补丁支持（_extract_changed_files）
-  - [x] 补丁验证（git apply --check）
+### 6.2 进化审批委员会
+- [x] `knowledge/review_board.py`
+  - [x] 5 个独立评审员（能力/安全/架构/质量/用户价值）
+  - [x] 每个评审员有独立 system prompt 和上下文
+  - [x] 独立 LLM 调用，互不干扰
+  - [x] 加权投票（信心高的评审员权重更大）
+  - [x] 三档裁决：approve / reject / revise
+  - [x] 可配置 quorum 和 approval_threshold
 
-### 6.3 自动测试 & 应用
+### 6.3 进化循环
 - [x] `knowledge/self_improver.py`
-  - [x] 生成补丁后自动运行测试套件
-  - [x] 测试通过 → 保留
-  - [x] 测试失败 → 自动 git rollback + 报告
-  - [x] 改进历史记录（JSONL 格式）
-  - [x] 单问题修复 & 批量修复模式
+  - [x] SelfEvolver — 核心循环：评估→吸收→审批→注册
+  - [x] 自动匹配知识源（按领域/关键词）
+  - [x] 调用 Phase 5 知识吸收系统
+  - [x] 审批通过后注册为 evolved_* 工具集
+  - [x] 进化历史记录（JSONL）
 
 ### 6.4 测试
-- [x] tests/test_self_improve.py — 21 个测试
-  - [x] Issue/AnalysisReport 数据结构测试
-  - [x] Patch 格式 & diff 提取测试
-  - [x] 补丁验证测试
-  - [x] 回滚测试（真实 git repo）
-  - [x] 历史记录读写测试
+- [x] tests/test_self_improve.py — 25 个测试
+  - [x] CapabilityGap/Inventory/Assessment 数据结构
+  - [x] ReviewBoard 投票逻辑（unanimous/majority/reject/revise/threshold）
+  - [x] 加权分数计算
+  - [x] EvolutionResult/SelfEvolver 基础测试
 
 ---
 

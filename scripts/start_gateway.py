@@ -6,9 +6,10 @@ MaxBot 启动脚本 — 集成飞书 WebSocket 长连接
     cd /root/maxbot
     python3 scripts/start_gateway.py
 
-配置（从 ~/.hermes/.env 自动加载）：
-    XIAOMI_API_KEY / OPENAI_API_KEY
-    XIAOMI_BASE_URL / OPENAI_BASE_URL
+配置（从 ~/.maxbot/.env 自动加载）：
+    MAXBOT_API_KEY
+    MAXBOT_BASE_URL
+    MAXBOT_MODEL
     FEISHU_APP_ID
     FEISHU_APP_SECRET
 """
@@ -29,8 +30,8 @@ from maxbot.gateway.channels.base import InboundMessage, OutboundMessage, Messag
 
 
 def load_env():
-    """从 ~/.hermes/.env 加载环境变量"""
-    env_path = os.path.expanduser("~/.hermes/.env")
+    """从 ~/.maxbot/.env 加载环境变量"""
+    env_path = os.path.expanduser("~/.maxbot/.env")
     if os.path.exists(env_path):
         with open(env_path) as f:
             for line in f:
@@ -43,13 +44,13 @@ def load_env():
 def main():
     load_env()
 
-    api_key = os.environ.get("XIAOMI_API_KEY") or os.environ.get("OPENAI_API_KEY", "")
-    base_url = os.environ.get("XIAOMI_BASE_URL") or os.environ.get("OPENAI_BASE_URL", "")
+    api_key = os.environ.get("MAXBOT_API_KEY", "")
+    base_url = os.environ.get("MAXBOT_BASE_URL", "")
     model = os.environ.get("MAXBOT_MODEL", "mimo-v2-pro")
     port = int(os.environ.get("MAXBOT_PORT", "8765"))
 
     if not api_key:
-        print("❌ 请设置 XIAOMI_API_KEY 或 OPENAI_API_KEY")
+        print("❌ 请设置 MAXBOT_API_KEY")
         sys.exit(1)
 
     # 创建 Gateway

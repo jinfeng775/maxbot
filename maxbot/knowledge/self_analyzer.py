@@ -1,7 +1,14 @@
 """
-自我分析器 — 扫描 MaxBot 自身代码，识别改进空间
+自我评估器 — 识别 MaxBot 的能力缺口
 
-核心思路：把代码扔给 LLM，让它找问题。不要自己写规则引擎。
+不是找 bug，而是回答：
+"我能做什么？不能做什么？上次失败的任务是什么？哪里需要进化？"
+
+评估维度：
+1. 任务失败分析 — 从历史记录看哪些任务搞不定
+2. 能力清单盘点 — 当前有多少工具/技能，覆盖了哪些领域
+3. 对标差距 — 和 Hermes/Claude Code/OpenClaw 比缺什么
+4. 用户行为分析 — 用户反复问什么但我做不到
 """
 
 from __future__ import annotations
@@ -11,198 +18,225 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
 
-from maxbot.knowledge.code_parser import scan_project, summarize_structure
+
+@dataclass
+class CapabilityGap:
+    """能力缺口"""
+    domain: str            # 领域：code_editing, web_browsing, data_analysis, etc.
+    description: str       # 缺什么能力
+    evidence: str          # 为什么认为缺这个（失败记录/用户反馈/对标差距）
+    priority: str          # critical, high, medium, low
+    suggested_solution: str = ""  # 建议怎么补
+    source: str = ""       # 哪里发现的（failure_history / user_pattern / benchmark）
 
 
 @dataclass
-class Issue:
-    """发现的问题"""
-    category: str          # bug, performance, missing_feature, code_quality, security
-    severity: str          # critical, high, medium, low
-    file: str
-    line: int | None = None
-    title: str = ""
-    description: str = ""
-    suggestion: str = ""
+class CapabilityInventory:
+    """当前能力清单"""
+    tools: list[str] = field(default_factory=list)
+    skills: list[str] = field(default_factory=list)
+    toolsets: list[str] = field(default_factory=list)
+    domains_covered: list[str] = field(default_factory=list)
 
 
 @dataclass
-class AnalysisReport:
-    """分析报告"""
-    project_root: str
-    issues: list[Issue] = field(default_factory=list)
+class SelfAssessment:
+    """自我评估报告"""
+    inventory: CapabilityInventory = field(default_factory=CapabilityInventory)
+    gaps: list[CapabilityGap] = field(default_factory=list)
+    strengths: list[str] = field(default_factory=list)
     summary: str = ""
-    raw_llm_response: str = ""
 
-    @property
-    def critical_count(self) -> int:
-        return sum(1 for i in self.issues if i.severity == "critical")
-
-    @property
-    def total_count(self) -> int:
-        return len(self.issues)
-
-    def by_category(self) -> dict[str, list[Issue]]:
-        result: dict[str, list[Issue]] = {}
-        for issue in self.issues:
-            result.setdefault(issue.category, []).append(issue)
-        return result
-
-    def text_report(self) -> str:
-        lines = [f"# 自我分析报告: {self.project_root}", ""]
-        lines.append(f"共发现 {self.total_count} 个问题（其中 {self.critical_count} 个严重）")
-        lines.append("")
-
-        for cat, issues in self.by_category().items():
-            lines.append(f"## {cat}")
-            for i in sorted(issues, key=lambda x: {"critical": 0, "high": 1, "medium": 2, "low": 3}.get(x.severity, 9)):
-                loc = f"{i.file}" + (f":{i.line}" if i.line else "")
-                lines.append(f"- [{i.severity}] {i.title} ({loc})")
-                if i.description:
-                    lines.append(f"  {i.description}")
-                if i.suggestion:
-                    lines.append(f"  → {i.suggestion}")
-            lines.append("")
-
-        if self.summary:
-            lines.append(f"## 总结\n{self.summary}")
-
-        return "\n".join(lines)
+    def top_gaps(self, n: int = 5) -> list[CapabilityGap]:
+        """返回优先级最高的 N 个缺口"""
+        priority_order = {"critical": 0, "high": 1, "medium": 2, "low": 3}
+        return sorted(self.gaps, key=lambda g: priority_order.get(g.priority, 9))[:n]
 
 
-# ── 自分析 prompt ──────────────────────────────────────────
+# ── 评估 prompt ────────────────────────────────────────────
 
-_SYSTEM_PROMPT = """你是 MaxBot 的自我分析引擎。你的任务是分析 MaxBot 的源代码，找出可以改进的地方。
+_ASSESSMENT_PROMPT = """你是 MaxBot 的自我进化评估引擎。
 
-分析维度：
-1. **Bug/风险** — 潜在的逻辑错误、边界情况未处理
-2. **性能** — 不必要的计算、可以优化的循环、内存泄漏风险
-3. **缺失功能** — 对比同类项目（Hermes, Claude Code, OpenClaw）缺少的能力
-4. **代码质量** — 重复代码、命名不清晰、复杂度过高
-5. **安全** — 输入验证不足、权限控制缺失
+你的任务不是找 bug，而是分析 MaxBot **缺什么能力**，找到真正的进化方向。
 
-输出格式：严格 JSON 数组，每个元素：
+输入包含：
+1. 当前能力清单（工具/技能/模块）
+2. 任务失败历史（哪些任务搞不定）
+3. 用户交互模式（用户反复问什么）
+4. 对标分析（Hermes/Claude Code/OpenClaw 的能力对比）
+
+你需要输出 JSON 数组，每个元素是一个能力缺口：
 ```json
-{
-  "category": "bug|performance|missing_feature|code_quality|security",
-  "severity": "critical|high|medium|low",
-  "file": "相对路径",
-  "line": 123,
-  "title": "一句话标题",
-  "description": "问题描述",
-  "suggestion": "改进建议"
-}
+[
+  {
+    "domain": "能力领域",
+    "description": "缺什么能力",
+    "evidence": "证据（从输入数据中引用）",
+    "priority": "critical|high|medium|low",
+    "suggested_solution": "建议怎么补（吸收哪个项目？生成什么工具？）",
+    "source": "failure_history|user_pattern|benchmark"
+  }
+]
 ```
 
-只输出 JSON，不要有其他文字。只报告真实问题，不要编造。"""
+只输出 JSON。只报告真实的能力缺口，不要编造。重点是"能做什么"而不是"代码有什么问题"。"""
 
 
-def analyze_self(
-    project_root: str | Path,
-    llm_client: Any,
+def assess(
+    tool_registry: Any = None,
+    skill_manager: Any = None,
+    failure_history: list[dict] | None = None,
+    user_patterns: list[dict] | None = None,
+    benchmark_file: str | Path | None = None,
+    llm_client: Any = None,
     model: str = "gpt-4o-mini",
-    focus: str | None = None,
-) -> AnalysisReport:
+) -> SelfAssessment:
     """
-    分析 MaxBot 自身代码
+    执行自我评估
 
     Args:
-        project_root: MaxBot 项目根目录
-        llm_client: OpenAI 兼容的 LLM 客户端
-        model: 使用的模型
-        focus: 可选的聚焦维度（bug/performance/missing_feature/code_quality/security）
+        tool_registry: 工具注册表（盘点当前工具）
+        skill_manager: 技能管理器（盘点当前技能）
+        failure_history: 失败任务记录 [{"task": ..., "error": ..., "timestamp": ...}]
+        user_patterns: 用户交互模式 [{"pattern": ..., "frequency": ...}]
+        benchmark_file: 对标文件路径（Hermes/CC/OC 的能力清单）
+        llm_client: LLM 客户端
+        model: 模型名
     """
-    root = Path(project_root)
+    assessment = SelfAssessment()
 
-    # 1. 扫描项目结构
-    structure = scan_project(root)
-    project_summary = summarize_structure(structure)
+    # 1. 盘点当前能力
+    assessment.inventory = _build_inventory(tool_registry, skill_manager)
 
-    # 2. 读取关键文件内容（按重要性取前 N 个文件）
-    key_files = _select_key_files(structure.modules, max_files=15)
-    code_context = _build_code_context(key_files, root)
+    # 2. 如果没有 LLM，返回基础评估
+    if not llm_client:
+        assessment.summary = _basic_summary(assessment.inventory)
+        return assessment
 
-    # 3. 构建 prompt
-    user_prompt = f"# MaxBot 项目结构\n\n{project_summary}\n\n# 关键源码\n\n{code_context}"
-    if focus:
-        user_prompt += f"\n\n# 本次分析聚焦：{focus}"
+    # 3. 构建上下文
+    context = _build_context(
+        assessment.inventory,
+        failure_history or [],
+        user_patterns or [],
+        benchmark_file,
+    )
 
-    # 4. 调用 LLM
-    report = AnalysisReport(project_root=str(root))
-
+    # 4. LLM 评估
     try:
         response = llm_client.chat.completions.create(
             model=model,
             messages=[
-                {"role": "system", "content": _SYSTEM_PROMPT},
-                {"role": "user", "content": user_prompt},
+                {"role": "system", "content": _ASSESSMENT_PROMPT},
+                {"role": "user", "content": context},
             ],
-            temperature=0.2,
+            temperature=0.3,
         )
         content = response.choices[0].message.content
-        report.raw_llm_response = content
 
-        # 解析 JSON
         import re
         json_match = re.search(r'\[.*\]', content, re.DOTALL)
         if json_match:
             items = json.loads(json_match.group(0))
             for item in items:
-                report.issues.append(Issue(
-                    category=item.get("category", "code_quality"),
-                    severity=item.get("severity", "medium"),
-                    file=item.get("file", ""),
-                    line=item.get("line"),
-                    title=item.get("title", ""),
+                assessment.gaps.append(CapabilityGap(
+                    domain=item.get("domain", "unknown"),
                     description=item.get("description", ""),
-                    suggestion=item.get("suggestion", ""),
+                    evidence=item.get("evidence", ""),
+                    priority=item.get("priority", "medium"),
+                    suggested_solution=item.get("suggested_solution", ""),
+                    source=item.get("source", ""),
                 ))
 
-        report.summary = f"扫描了 {len(structure.modules)} 个文件，{structure.total_functions} 个函数"
+        assessment.summary = f"当前 {len(assessment.inventory.tools)} 个工具，发现 {len(assessment.gaps)} 个能力缺口"
 
     except Exception as e:
-        report.summary = f"分析失败: {e}"
+        assessment.summary = f"评估失败: {e}"
 
-    return report
-
-
-def _select_key_files(modules: list, max_files: int = 15) -> list:
-    """选关键文件（核心模块优先，跳过测试和 __pycache__）"""
-    priority_prefixes = ["core/", "knowledge/", "tools/", "gateway/", "multi_agent/"]
-    key = []
-    rest = []
-
-    for mod in modules:
-        if any(mod.file_path.startswith(p) for p in priority_prefixes):
-            key.append(mod)
-        elif not mod.file_path.startswith("tests/"):
-            rest.append(mod)
-
-    return (key + rest)[:max_files]
+    return assessment
 
 
-def _build_code_context(modules: list, root: Path, max_chars: int = 30000) -> str:
-    """构建代码上下文（读取文件内容）"""
-    parts = []
-    total = 0
+def _build_inventory(tool_registry: Any, skill_manager: Any) -> CapabilityInventory:
+    """盘点当前能力"""
+    inventory = CapabilityInventory()
 
-    for mod in modules:
-        filepath = root / mod.file_path
-        if not filepath.is_file():
-            continue
+    if tool_registry:
         try:
-            content = filepath.read_text(encoding="utf-8")
+            tools = tool_registry.list_tools()
+            inventory.tools = [t.name for t in tools]
+            inventory.toolsets = list(set(t.toolset for t in tools))
         except Exception:
-            continue
+            pass
 
-        # 截断过长文件
-        if len(content) > 3000:
-            content = content[:3000] + "\n# ... truncated"
+    if skill_manager:
+        try:
+            skills = skill_manager.list_skills()
+            inventory.skills = [s.name for s in skills]
+        except Exception:
+            pass
 
-        block = f"## {mod.file_path}\n```python\n{content}\n```\n"
-        if total + len(block) > max_chars:
-            break
-        parts.append(block)
-        total += len(block)
+    # 根据工具名推断覆盖领域
+    tool_names = set(inventory.tools)
+    domain_map = {
+        "file": ["read_file", "write_file", "search_files", "patch_file"],
+        "shell": ["shell", "exec_python"],
+        "git": ["git_status", "git_diff", "git_log", "git_commit"],
+        "web": ["web_search", "web_fetch"],
+        "code_editing": ["code_edit", "code_edit_multi"],
+        "notebook": ["notebook_read", "notebook_edit"],
+        "multi_agent": ["spawn_agent", "spawn_agents_parallel"],
+        "knowledge": ["knowledge_absorb"],
+    }
+    for domain, domain_tools in domain_map.items():
+        if tool_names & set(domain_tools):
+            inventory.domains_covered.append(domain)
+
+    return inventory
+
+
+def _build_context(
+    inventory: CapabilityInventory,
+    failure_history: list[dict],
+    user_patterns: list[dict],
+    benchmark_file: str | Path | None,
+) -> str:
+    """构建 LLM 评估上下文"""
+    parts = ["# MaxBot 自我评估\n"]
+
+    # 当前能力
+    parts.append("## 当前能力清单")
+    parts.append(f"工具 ({len(inventory.tools)}): {', '.join(inventory.tools[:30])}")
+    parts.append(f"技能 ({len(inventory.skills)}): {', '.join(inventory.skills[:20])}")
+    parts.append(f"工具集: {', '.join(inventory.toolsets)}")
+    parts.append(f"覆盖领域: {', '.join(inventory.domains_covered)}")
+
+    # 失败历史
+    if failure_history:
+        parts.append("\n## 任务失败历史")
+        for f in failure_history[-20:]:  # 最近 20 条
+            parts.append(f"- [{f.get('timestamp', '?')}] {f.get('task', '?')} → {f.get('error', '?')}")
+
+    # 用户模式
+    if user_patterns:
+        parts.append("\n## 用户交互模式")
+        for p in user_patterns[:20]:
+            parts.append(f"- {p.get('pattern', '?')} (出现 {p.get('frequency', '?')} 次)")
+
+    # 对标
+    if benchmark_file:
+        benchmark_path = Path(benchmark_file)
+        if benchmark_path.is_file():
+            try:
+                content = benchmark_path.read_text(encoding="utf-8")[:5000]
+                parts.append(f"\n## 对标能力清单\n{content}")
+            except Exception:
+                pass
 
     return "\n".join(parts)
+
+
+def _basic_summary(inventory: CapabilityInventory) -> str:
+    """无 LLM 时的基础摘要"""
+    return (
+        f"当前 {len(inventory.tools)} 个工具，{len(inventory.skills)} 个技能，"
+        f"覆盖 {len(inventory.domains_covered)} 个领域"
+    )
