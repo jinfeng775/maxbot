@@ -17,6 +17,7 @@ MaxBot 启动脚本 — 集成飞书 WebSocket 长连接
 import json
 import os
 import sys
+from pathlib import Path
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
@@ -115,6 +116,61 @@ def main():
     except Exception as e:
         feishu_status = f"❌ 错误: {e}"
 
+    # 微信集成
+    weixin = None
+    weixin_status = "❌ 未配置"
+
+    try:
+        from maxbot.gateway.channels.weixin import WeixinChannel
+        weixin_cred_path = Path.home() / ".maxbot" / "weixin" / "weixin_credentials.json"
+        has_weixin_env = os.environ.get("WEIXIN_ACCOUNT_ID") and os.environ.get("WEIXIN_TOKEN")
+        has_weixin_cred = weixin_cred_path.exists()
+
+        if has_weixin_env or has_weixin_cred:
+            weixin = WeixinChannel()
+            weixin_status = "✅ 已配置 (长轮询)"
+
+            @app.on_event("startup")
+            async def startup_weixin():
+                await weixin.connect()
+                print("✅ 微信长轮询已启动")
+
+            @app.on_event("shutdown")
+            async def shutdown_weixin():
+                if weixin:
+                    await weixin.disconnect()
+
+            async def handle_weixin_message(msg: InboundMessage):
+                """微信消息 → Agent 处理 → 回复"""
+                session_id = f"weixin-{msg.chat_id}"
+                session = server.session_manager.get_or_create(session_id)
+
+                prefix = f"[群聊/{msg.sender_name}] " if msg.is_group else ""
+                try:
+                    response = session.agent.chat(prefix + msg.content)
+                    session.message_count += 1
+
+                    await weixin.send_message(OutboundMessage(
+                        chat_id=msg.chat_id,
+                        message_type=MessageType.TEXT,
+                        content=response,
+                    ))
+                except Exception as e:
+                    print(f"❌ 微信处理失败: {e}")
+                    try:
+                        await weixin.send_message(OutboundMessage(
+                            chat_id=msg.chat_id,
+                            content=f"⚠️ 处理出错: {str(e)[:100]}",
+                        ))
+                    except Exception:
+                        pass
+
+            weixin.on_message_callback(handle_weixin_message)
+    except ImportError as e:
+        weixin_status = f"⚠️ 缺少依赖: {e}"
+    except Exception as e:
+        weixin_status = f"❌ 错误: {e}"
+
     # 启动
     print(f"""
 ╔══════════════════════════════════════════╗
@@ -124,6 +180,7 @@ def main():
 ║  端口: {port:<34}║
 ║  工具: {len(registry):<34}║
 ║  飞书: {feishu_status:<34}║
+║  微信: {weixin_status:<34}║
 ╠══════════════════════════════════════════╣
 ║  API 文档: http://localhost:{port}/docs{' ' * (12 - len(str(port)))}║
 ╚══════════════════════════════════════════╝
