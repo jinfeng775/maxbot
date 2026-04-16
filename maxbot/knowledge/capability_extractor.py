@@ -42,6 +42,7 @@ class ExtractedCapability:
     handler_code: str = ""  # 生成的 handler Python 代码
     raw_docstring: str = ""
     confidence: float = 0.0  # LLM 对提取结果的信心
+    repo_path: str = ""  # 吸收的代码仓库路径（用于 handler 导入）
 
     def to_tool_schema(self) -> dict[str, Any]:
         """转为 OpenAI function calling schema"""
@@ -170,6 +171,7 @@ def _build_analysis_prompt(module: ModuleInfo, project_summary: str = "") -> str
 def extract_capabilities_heuristic(
     module: ModuleInfo,
     min_docstring_len: int = 20,
+    repo_path: str = "",
 ) -> list[ExtractedCapability]:
     """
     基于启发式规则提取能力（不需要 LLM）
@@ -203,7 +205,7 @@ def extract_capabilities_heuristic(
             properties[pname] = prop
 
         # Generate handler code
-        handler = _generate_handler_code(func, module)
+        handler = _generate_handler_code(func, module, repo_path)
 
         cap = ExtractedCapability(
             name=f"{Path(module.file_path).stem}_{func.name}",
@@ -217,6 +219,7 @@ def extract_capabilities_heuristic(
             handler_code=handler,
             confidence=0.6,  # heuristic — lower confidence
             tags=[module.language, "auto-extracted"],
+            repo_path=repo_path,
         )
         capabilities.append(cap)
 
@@ -241,7 +244,7 @@ def extract_capabilities_heuristic(
                     required.append(pname)
                 properties[pname] = prop
 
-            handler = _generate_method_handler_code(method, cls, module)
+            handler = _generate_method_handler_code(method, cls, module, repo_path)
 
             cap = ExtractedCapability(
                 name=f"{Path(module.file_path).stem}_{cls.name.lower()}_{method.name}",
@@ -257,6 +260,7 @@ def extract_capabilities_heuristic(
                 handler_code=handler,
                 confidence=0.5,
                 tags=[module.language, "auto-extracted", "method"],
+                repo_path=repo_path,
             )
             capabilities.append(cap)
 
@@ -284,44 +288,85 @@ def _python_type_to_json(py_type: str) -> str:
     return mapping.get(base, "string")
 
 
-def _generate_handler_code(func: FunctionInfo, module: ModuleInfo) -> str:
-    """生成工具 handler Python 代码"""
+def _generate_handler_code(func: FunctionInfo, module: ModuleInfo, repo_path: str = "") -> str:
+    """生成工具 handler Python 代码 — 真正可执行的版本"""
+    # 构建参数签名
     params_sig = ", ".join(
         f"{p['name']}: {p.get('type', 'str')}" if p.get("type") else p["name"]
         for p in func.params
     )
-    params_call = ", ".join(p["name"] for p in func.params)
 
-    return f'''def {func.name}__tool({params_sig}) -> str:
-    """Auto-generated handler for {module.file_path}::{func.name}"""
+    # 构建函数调用参数
+    params_call = ", ".join(
+        f"{p['name']}={p['name']}" if p.get("type") else p["name"]
+        for p in func.params
+    )
+
+    # 模块文件路径
+    module_file = module.file_path
+    mod_name = Path(module_file).stem
+    func_name = func.name
+
+    # 导入路径处理
+    import_block = ""
+    if repo_path:
+        import_block = f"""
+    # Add absorbed repo to path
+    import sys
+    _repo = {repo_path!r}
+    if _repo not in sys.path:
+        sys.path.insert(0, _repo)"""
+
+    return f'''def {func_name}__tool({params_sig}) -> str:
+    """Auto-generated: {module_file}::{func_name}"""
     import json
-    try:
-        # Import and call the original function
-        import importlib
-        mod_name = "{Path(module.file_path).stem}"
-        # In production, this would import from the absorbed repo
-        result = {{}}  # Placeholder — real implementation needs import path
-        return json.dumps(result, ensure_ascii=False)
+    try:{import_block}
+        from {mod_name} import {func_name} as _fn
+        result = _fn({params_call})
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
-        return json.dumps({{"error": str(e)}}, ensure_ascii=False)'''
+        return json.dumps({{"error": str(e), "tool": "{func_name}__tool"}}, ensure_ascii=False)'''
 
 
-def _generate_method_handler_code(method: FunctionInfo, cls: ClassInfo, module: ModuleInfo) -> str:
-    """生成类方法的 handler 代码"""
+def _generate_method_handler_code(method: FunctionInfo, cls: ClassInfo, module: ModuleInfo, repo_path: str = "") -> str:
+    """生成类方法的 handler 代码 — 真正可执行的版本"""
     params_sig = ", ".join(
         f"{p['name']}: {p.get('type', 'str')}" if p.get("type") else p["name"]
         for p in method.params
     )
+    params_call = ", ".join(
+        f"{p['name']}={p['name']}" if p.get("type") else p["name"]
+        for p in method.params
+    )
 
-    return f'''def {cls.name.lower()}_{method.name}__tool({params_sig}) -> str:
-    """Auto-generated handler for {module.file_path}::{cls.name}.{method.name}"""
+    module_file = module.file_path
+    mod_name = Path(module_file).stem
+    cls_name = cls.name
+    method_name = method.name
+
+    import_block = ""
+    if repo_path:
+        import_block = f"""
+    # Add absorbed repo to path
+    import sys
+    _repo = {repo_path!r}
+    if _repo not in sys.path:
+        sys.path.insert(0, _repo)"""
+
+    return f'''def {cls_name.lower()}_{method_name}__tool({params_sig}) -> str:
+    """Auto-generated: {module_file}::{cls_name}.{method_name}"""
     import json
-    try:
-        # Would instantiate {cls.name} and call {method.name}
-        result = {{}}
-        return json.dumps(result, ensure_ascii=False)
+    try:{import_block}
+        from {mod_name} import {cls_name}
+        _obj = {cls_name}()
+        result = _obj.{method_name}({params_call})
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
-        return json.dumps({{"error": str(e)}}, ensure_ascii=False)'''
+        return json.dumps({{"error": str(e), "tool": "{cls_name.lower()}_{method_name}__tool"}}, ensure_ascii=False)'''
 
 
 # ── Batch Extraction ────────────────────────────────────────
@@ -332,6 +377,7 @@ def extract_from_repo(
     use_llm: bool = False,
     llm_client: Any = None,
     max_modules_for_llm: int = 20,
+    min_docstring_len: int = 20,
 ) -> list[ExtractedCapability]:
     """
     从代码仓库批量提取能力
@@ -359,7 +405,7 @@ def extract_from_repo(
             all_capabilities.extend(caps)
         else:
             # Heuristic fallback
-            caps = extract_capabilities_heuristic(module)
+            caps = extract_capabilities_heuristic(module, min_docstring_len, repo_path=str(repo_path))
             all_capabilities.extend(caps)
 
     # Deduplicate by fingerprint

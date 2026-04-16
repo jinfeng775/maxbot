@@ -196,35 +196,35 @@ Source: {cap.source_file}::{cap.source_function}
 {cap.handler_code}
 '''
         else:
-            # Generate a stub
+            # Generate a fallback handler (shouldn't happen with proper extraction)
             params_sig = ", ".join(
                 f'{pname}: str'
                 for pname in cap.parameters
             )
-            params_dict = ", ".join(
-                f'"{pname}": {pname}'
-                for pname in cap.parameters
-            )
+            import_block = ""
+            if cap.repo_path:
+                import_block = f"""
+    import sys
+    if {cap.repo_path!r} not in sys.path:
+        sys.path.insert(0, {cap.repo_path!r})"""
+
+            mod_name = Path(cap.source_file).stem if cap.source_file else "unknown"
             return f'''"""
 Auto-generated handler for: {cap.name}
 Source: {cap.source_file}::{cap.source_function}
-
-TODO: Implement actual call to original function.
 """
 
 import json
 
 
 def {cap.name}({params_sig}) -> str:
-    """
-    {cap.description}
-    """
-    try:
-        # Call original: {cap.source_file}::{cap.source_function}
-        params = {{{params_dict}}}
-        # TODO: Wire up to actual function import
-        result = {{"status": "stub", "params": params}}
-        return json.dumps(result, ensure_ascii=False)
+    """{cap.description}"""
+    try:{import_block}
+        from {mod_name} import {cap.source_function} as _fn
+        result = _fn({", ".join(f"{pname}={pname}" for pname in cap.parameters)})
+        if isinstance(result, str):
+            return result
+        return json.dumps(result, ensure_ascii=False, default=str)
     except Exception as e:
         return json.dumps({{"error": str(e)}}, ensure_ascii=False)
 '''
