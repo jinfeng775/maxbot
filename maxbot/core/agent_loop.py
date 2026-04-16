@@ -61,6 +61,7 @@ class AgentConfig:
     session_id: str | None = None       # 会话 ID（用于持久化）
     session_store: Any | None = None    # SessionStore 实例（None = 自动创建）
     auto_save: bool = True              # 每次对话后自动保存
+    max_conversation_turns: int = 40    # 最大会话轮询次数，超过则终止
 
 
 @dataclass
@@ -159,6 +160,7 @@ class Agent:
         self.messages: list[Message] = []
         self._client: OpenAI | None = None
         self._total_tokens_used: int = 0
+        self._conversation_turns: int = 0  # 会话轮询计数器
 
         # ── 修复 2：集成 Memory 系统 ──
         self._memory = None
@@ -206,6 +208,11 @@ class Agent:
 
     def chat(self, user_message: str) -> str:
         """单次对话入口"""
+        # 检查会话轮询次数限制
+        self._conversation_turns += 1
+        if self._conversation_turns > self.config.max_conversation_turns:
+            return f"⚠️ 会话轮询次数已超过限制（{self.config.max_conversation_turns} 次），任务终止。。"
+
         # 注入 system prompt（含 memory）
         if not self.messages or self.messages[0].role != "system":
             system_content = self.config.system_prompt
@@ -460,6 +467,7 @@ class Agent:
         """重置对话（保留 memory 和 session）"""
         self.messages.clear()
         self._total_tokens_used = 0
+        self._conversation_turns = 0  # 重置会话轮询计数器
 
     def save_session(self) -> bool:
         """保存当前会话到数据库"""
