@@ -17,6 +17,7 @@ from typing import Any, Callable
 from openai import OpenAI
 
 from maxbot.core.tool_registry import ToolRegistry
+from maxbot.sessions import SessionStore
 
 
 def _retry_api_call(fn, max_attempts: int = 3, base_delay: float = 1.0):
@@ -57,6 +58,9 @@ class AgentConfig:
     compress_at_tokens: int = 80_000   # 触发压缩的阈值
     memory_enabled: bool = True         # 是否启用持久记忆
     memory_db_path: str | None = None   # 记忆数据库路径（None = 默认）
+    session_id: str | None = None       # 会话 ID（用于持久化）
+    session_store: Any | None = None    # SessionStore 实例（None = 自动创建）
+    auto_save: bool = True              # 每次对话后自动保存
 
 
 @dataclass
@@ -141,6 +145,7 @@ class Agent:
         config: AgentConfig,
         registry: ToolRegistry | None = None,
         memory: Any | None = None,  # Memory 实例，None = 自动创建
+        session_store: SessionStore | None = None,
     ):
         self.config = config
 
@@ -164,6 +169,18 @@ class Agent:
                 from maxbot.core.memory import Memory
                 db_path = config.memory_db_path or str(Path.home() / ".maxbot" / "memory.db")
                 self._memory = Memory(path=db_path)
+
+        # ── 修复 3：会话持久化 ──
+        self._session_id = config.session_id
+        self._session_store = session_store or (
+            config.session_store if config.session_store else None
+        )
+        # 如果有 session_id 但没有 store，自动创建
+        if self._session_id and self._session_store is None:
+            self._session_store = SessionStore()
+        # 如果有 session_id，尝试加载已有会话
+        if self._session_id and self._session_store:
+            self._load_session()
 
         # 回调
         self.on_tool_start: Callable | None = None
@@ -200,7 +217,13 @@ class Agent:
             self.messages.insert(0, Message(role="system", content=system_content))
 
         self.messages.append(Message(role="user", content=user_message))
-        return self._run_loop()
+        response = self._run_loop()
+
+        # 自动保存会话
+        if self._session_id and self._session_store and self.config.auto_save:
+            self.save_session()
+
+        return response
 
     def _run_loop(self) -> str:
         """核心循环（带重试 + 上下文压缩）"""
@@ -434,9 +457,74 @@ class Agent:
             self.on_compress(len(to_compress))
 
     def reset(self):
-        """重置对话（保留 memory）"""
+        """重置对话（保留 memory 和 session）"""
         self.messages.clear()
         self._total_tokens_used = 0
+
+    def save_session(self) -> bool:
+        """保存当前会话到数据库"""
+        if not self._session_id or not self._session_store:
+            return False
+        try:
+            # 确保 session 存在
+            session = self._session_store.get(self._session_id)
+            if not session:
+                # 从第一条 user 消息取标题
+                title = ""
+                for m in self.messages:
+                    if m.role == "user":
+                        title = m.content[:50]
+                        break
+                self._session_store.create(self._session_id, title=title)
+
+            # 保存消息
+            api_messages = [m.to_api() for m in self.messages]
+            self._session_store.save_messages(self._session_id, api_messages)
+            return True
+        except Exception as e:
+            print(f"⚠️ 保存会话失败: {e}")
+            return False
+
+    def _load_session(self):
+        """从数据库加载会话"""
+        if not self._session_id or not self._session_store:
+            return
+        try:
+            session = self._session_store.get(self._session_id)
+            if session and session.messages:
+                self.messages = [
+                    Message(
+                        role=m.get("role", "user"),
+                        content=m.get("content", ""),
+                        tool_calls=m.get("tool_calls", []),
+                        tool_call_id=m.get("tool_call_id"),
+                        name=m.get("name"),
+                    )
+                    for m in session.messages
+                ]
+        except Exception as e:
+            print(f"⚠️ 加载会话失败: {e}")
+
+    def list_sessions(self, limit: int = 20) -> list[dict]:
+        """列出历史会话"""
+        if not self._session_store:
+            return []
+        sessions = self._session_store.list_sessions(limit)
+        return [
+            {
+                "session_id": s.session_id,
+                "title": s.title,
+                "updated_at": s.updated_at,
+                "message_count": len(s.messages) if s.messages else 0,
+            }
+            for s in sessions
+        ]
+
+    def delete_session(self, session_id: str) -> bool:
+        """删除会话"""
+        if not self._session_store:
+            return False
+        return self._session_store.delete(session_id)
 
     def get_history(self) -> list[dict]:
         """获取完整对话历史"""

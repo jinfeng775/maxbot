@@ -294,3 +294,107 @@ class TestMessageFormat:
         api = m.to_api()
         assert api["tool_call_id"] == "123"
         assert api["name"] == "my_tool"
+
+
+# ══════════════════════════════════════════════════════════════
+# 会话持久化测试
+# ══════════════════════════════════════════════════════════════
+
+from maxbot.sessions import SessionStore
+
+
+class TestSessionPersistence:
+    """会话保存/加载"""
+
+    def test_save_and_load(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+
+            config = AgentConfig(
+                memory_enabled=False,
+                session_id="test-session-1",
+                auto_save=False,
+            )
+            agent = Agent(config=config, session_store=store)
+
+            # 手动添加消息
+            agent.messages = [
+                Message(role="system", content="你是 MaxBot"),
+                Message(role="user", content="你好"),
+                Message(role="assistant", content="你好！"),
+            ]
+
+            # 保存
+            assert agent.save_session() is True
+
+            # 创建新 agent 加载
+            config2 = AgentConfig(
+                memory_enabled=False,
+                session_id="test-session-1",
+                auto_save=False,
+            )
+            agent2 = Agent(config=config2, session_store=store)
+            assert len(agent2.messages) == 3
+            assert agent2.messages[1].content == "你好"
+            assert agent2.messages[2].content == "你好！"
+
+    def test_no_session_id_no_persist(self):
+        """没有 session_id 时不保存"""
+        config = AgentConfig(memory_enabled=False, session_id=None)
+        agent = Agent(config=config)
+        assert agent.save_session() is False
+
+    def test_list_sessions(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+
+            # 创建两个 session
+            store.create("s1", title="第一个会话")
+            store.save_messages("s1", [{"role": "user", "content": "hi"}])
+            store.create("s2", title="第二个会话")
+            store.save_messages("s2", [{"role": "user", "content": "hello"}])
+
+            config = AgentConfig(memory_enabled=False, session_id="s1")
+            agent = Agent(config=config, session_store=store)
+
+            sessions = agent.list_sessions()
+            assert len(sessions) == 2
+            ids = [s["session_id"] for s in sessions]
+            assert "s1" in ids
+            assert "s2" in ids
+
+    def test_delete_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+            store.create("to-delete")
+
+            config = AgentConfig(memory_enabled=False, session_id="to-delete")
+            agent = Agent(config=config, session_store=store)
+
+            assert agent.delete_session("to-delete") is True
+            assert agent.delete_session("to-delete") is False  # 已删除
+
+    def test_auto_save_title_from_first_message(self):
+        """自动保存时从第一条 user 消息取标题"""
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+
+            config = AgentConfig(
+                memory_enabled=False,
+                session_id="title-test",
+                auto_save=False,
+            )
+            agent = Agent(config=config, session_store=store)
+            agent.messages = [
+                Message(role="user", content="帮我写一个 Python 排序算法"),
+                Message(role="assistant", content="好的"),
+            ]
+            agent.save_session()
+
+            session = store.get("title-test")
+            assert session is not None
+            assert "Python" in session.title
