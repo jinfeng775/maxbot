@@ -2,7 +2,7 @@
 Agent Loop — MaxBot 核心对话循环
 
 参考来源：
-- Hermes: run_conversation 循环、消息格式
+- Hermes: run_conversation 循环、消息格式、memory 注入
 - Claude Code: tool_use 流程、迭代控制
 """
 
@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any, Callable
 
 from openai import OpenAI
@@ -19,17 +20,18 @@ from maxbot.core.tool_registry import ToolRegistry
 
 
 def _retry_api_call(fn, max_attempts: int = 3, base_delay: float = 1.0):
-    """指数退避重试"""
+    """指数退避重试（支持 429/5xx）"""
     last_exc = None
     for attempt in range(max_attempts):
         try:
             return fn()
         except Exception as e:
             last_exc = e
-            # 不重试的错误类型
             err_str = str(e).lower()
+            # 不重试的致命错误
             if any(x in err_str for x in ("invalid_api_key", "authentication", "permission", "400", "404")):
                 raise
+            # 可重试：429 rate limit, 500, 502, 503, timeout, connection
             if attempt < max_attempts - 1:
                 delay = base_delay * (2 ** attempt)
                 time.sleep(delay)
@@ -53,6 +55,8 @@ class AgentConfig:
     )
     max_context_tokens: int = 128_000  # 上下文上限
     compress_at_tokens: int = 80_000   # 触发压缩的阈值
+    memory_enabled: bool = True         # 是否启用持久记忆
+    memory_db_path: str | None = None   # 记忆数据库路径（None = 默认）
 
 
 @dataclass
@@ -77,24 +81,89 @@ class Message:
         return msg
 
 
+# ── 内置 memory 工具（Agent 内部拦截，不走 registry）───
+
+_MEMORY_TOOL_SCHEMA = {
+    "type": "function",
+    "function": {
+        "name": "memory",
+        "description": "管理持久记忆。存储/读取/搜索用户偏好、重要事实、历史决策。重启后仍然保留。",
+        "parameters": {
+            "type": "object",
+            "properties": {
+                "action": {
+                    "type": "string",
+                    "enum": ["set", "get", "search", "delete", "list"],
+                    "description": "操作类型",
+                },
+                "key": {
+                    "type": "string",
+                    "description": "记忆键名（set/get/delete 时必填）",
+                },
+                "value": {
+                    "type": "string",
+                    "description": "记忆值（set 时必填）",
+                },
+                "category": {
+                    "type": "string",
+                    "description": "分类：memory/user/skill/env（set 时可选，默认 memory）",
+                    "default": "memory",
+                },
+                "query": {
+                    "type": "string",
+                    "description": "搜索关键词（search 时必填）",
+                },
+            },
+            "required": ["action"],
+        },
+    },
+}
+
+
 class Agent:
     """
     核心 Agent 循环
 
     用法：
-        registry = ToolRegistry()
-        registry.load_builtins()
-
-        agent = Agent(config=AgentConfig(...), registry=registry)
+        # 最简用法（自动使用全局 registry + 默认 memory）
+        agent = Agent(config=AgentConfig(...))
         response = agent.chat("你好")
+
+        # 传入自定义 registry
+        agent = Agent(config=AgentConfig(...), registry=my_registry)
+
+        # 禁用 memory
+        agent = Agent(config=AgentConfig(..., memory_enabled=False))
     """
 
-    def __init__(self, config: AgentConfig, registry: ToolRegistry | None = None):
+    def __init__(
+        self,
+        config: AgentConfig,
+        registry: ToolRegistry | None = None,
+        memory: Any | None = None,  # Memory 实例，None = 自动创建
+    ):
         self.config = config
-        self.registry = registry or ToolRegistry()
+
+        # ── 修复 1：默认使用全局 registry ──
+        if registry is None:
+            from maxbot.tools._registry import registry as global_registry
+            self.registry = global_registry
+        else:
+            self.registry = registry
+
         self.messages: list[Message] = []
         self._client: OpenAI | None = None
         self._total_tokens_used: int = 0
+
+        # ── 修复 2：集成 Memory 系统 ──
+        self._memory = None
+        if config.memory_enabled:
+            if memory is not None:
+                self._memory = memory
+            else:
+                from maxbot.core.memory import Memory
+                db_path = config.memory_db_path or str(Path.home() / ".maxbot" / "memory.db")
+                self._memory = Memory(path=db_path)
 
         # 回调
         self.on_tool_start: Callable | None = None
@@ -113,11 +182,22 @@ class Agent:
             self._client = OpenAI(**kwargs)
         return self._client
 
+    @property
+    def memory(self):
+        """访问持久记忆"""
+        return self._memory
+
     def chat(self, user_message: str) -> str:
         """单次对话入口"""
-        # 注入 system prompt
+        # 注入 system prompt（含 memory）
         if not self.messages or self.messages[0].role != "system":
-            self.messages.insert(0, Message(role="system", content=self.config.system_prompt))
+            system_content = self.config.system_prompt
+            # 注入持久记忆
+            if self._memory:
+                mem_text = self._memory.export_text()
+                if mem_text:
+                    system_content += f"\n\n{mem_text}"
+            self.messages.insert(0, Message(role="system", content=system_content))
 
         self.messages.append(Message(role="user", content=user_message))
         return self._run_loop()
@@ -133,7 +213,11 @@ class Agent:
 
             # 构建 API 请求
             api_messages = [m.to_api() for m in self.messages]
+
+            # 工具 schema（含 memory 工具）
             tool_schemas = self.registry.get_schemas()
+            if self._memory:
+                tool_schemas.append(_MEMORY_TOOL_SCHEMA)
 
             kwargs: dict[str, Any] = {
                 "model": self.config.model,
@@ -163,6 +247,8 @@ class Agent:
             if not msg.tool_calls:
                 assistant_msg = Message(role="assistant", content=msg.content or "")
                 self.messages.append(assistant_msg)
+                # 自动提取重要信息存入 memory
+                self._auto_extract_memory(user_message=None, response=msg.content or "")
                 return msg.content or ""
 
             # 工具调用
@@ -188,13 +274,15 @@ class Agent:
                 except json.JSONDecodeError:
                     args = {}
 
-                if self.on_tool_start:
-                    self.on_tool_start(name, args)
-
-                result = self.registry.call(name, args)
-
-                if self.on_tool_end:
-                    self.on_tool_end(name, result)
+                # ── 拦截 memory 工具调用 ──
+                if name == "memory" and self._memory:
+                    result = self._handle_memory_call(args)
+                else:
+                    if self.on_tool_start:
+                        self.on_tool_start(name, args)
+                    result = self.registry.call(name, args)
+                    if self.on_tool_end:
+                        self.on_tool_end(name, result)
 
                 tool_msg = Message(
                     role="tool",
@@ -207,10 +295,102 @@ class Agent:
         # 超过最大迭代次数
         return "（已达到最大迭代次数，任务可能未完成）"
 
+    def _handle_memory_call(self, args: dict) -> str:
+        """处理 memory 工具调用"""
+        action = args.get("action", "")
+        try:
+            if action == "set":
+                key = args["key"]
+                value = args["value"]
+                category = args.get("category", "memory")
+                self._memory.set(key, value, category)
+                return json.dumps({"success": True, "key": key})
+
+            elif action == "get":
+                key = args["key"]
+                value = self._memory.get(key)
+                return json.dumps({"key": key, "value": value})
+
+            elif action == "search":
+                query = args["query"]
+                entries = self._memory.search(query)
+                return json.dumps({
+                    "results": [
+                        {"key": e.key, "value": e.value, "category": e.category}
+                        for e in entries
+                    ]
+                })
+
+            elif action == "delete":
+                key = args["key"]
+                deleted = self._memory.delete(key)
+                return json.dumps({"success": deleted, "key": key})
+
+            elif action == "list":
+                category = args.get("category")
+                entries = self._memory.list_all(category)
+                return json.dumps({
+                    "entries": [
+                        {"key": e.key, "value": e.value, "category": e.category}
+                        for e in entries
+                    ]
+                })
+
+            else:
+                return json.dumps({"error": f"未知 memory 操作: {action}"})
+
+        except Exception as e:
+            return json.dumps({"error": str(e)})
+
+    def _auto_extract_memory(self, user_message: str | None, response: str):
+        """
+        自动提取重要信息存入 memory（简单启发式）
+
+        规则：
+        - 用户说"记住..." → 自动存储
+        - 用户说"我叫/我是/我的名字是..." → 存储用户信息
+        - 不做 LLM 调用，纯字符串匹配，零成本
+        """
+        if not self._memory:
+            return
+
+        # 取最近的 user 消息
+        user_msg = ""
+        for m in reversed(self.messages):
+            if m.role == "user":
+                user_msg = m.content
+                break
+
+        if not user_msg:
+            return
+
+        msg_lower = user_msg.lower()
+
+        # "记住 XXX"
+        for prefix in ("记住", "记住：", "记住:", "remember", "记住这个"):
+            if msg_lower.startswith(prefix):
+                fact = user_msg[len(prefix):].strip()
+                if fact:
+                    self._memory.set(f"fact_{int(time.time())}", fact, category="memory")
+                return
+
+        # "我叫 XXX" / "我是 XXX" / "我的名字是 XXX"
+        import re
+        name_patterns = [
+            (r"(?:我叫|我的名字是|my name is)\s*(.+)", "user"),
+            (r"(?:我是|i am|i'm)\s+(.+)", "user"),
+        ]
+        for pattern, category in name_patterns:
+            m = re.search(pattern, user_msg, re.IGNORECASE)
+            if m:
+                value = m.group(1).strip().rstrip("。，.!！")
+                if value and len(value) < 100:
+                    self._memory.set("user_name", value, category=category)
+                return
+
     def _maybe_compress(self):
         """检查上下文大小，必要时压缩"""
         total_chars = sum(len(m.content) for m in self.messages)
-        # 粗估 token（1 中文字 ≈ 2 token，1 英文字符 ≈ 0.25 token）
         estimated = total_chars // 2
         if estimated > self.config.compress_at_tokens:
             self._compress_messages()
@@ -254,7 +434,7 @@ class Agent:
             self.on_compress(len(to_compress))
 
     def reset(self):
-        """重置对话"""
+        """重置对话（保留 memory）"""
         self.messages.clear()
         self._total_tokens_used = 0
 
@@ -267,6 +447,8 @@ class Agent:
         return {
             "total_messages": len(self.messages),
             "total_tokens_used": self._total_tokens_used,
+            "memory_enabled": self._memory is not None,
+            "memory_entries": len(self._memory.list_all()) if self._memory else 0,
             "roles": {
                 "system": sum(1 for m in self.messages if m.role == "system"),
                 "user": sum(1 for m in self.messages if m.role == "user"),
