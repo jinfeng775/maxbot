@@ -327,42 +327,38 @@
 
 ## Phase 6：自我改进
 
-**状态：🔲 未开始**
-**预计周期：2-3 周**
+**状态：✅ 已完成** `2026-04-16`
 **来源：原创（部分参考 Claude Code 的自我修改能力）**
 
 ### 6.1 自我代码分析
-- [ ] `knowledge/self_analyzer.py`
-  - [ ] 读取 MaxBot 自身源码
-  - [ ] 识别代码质量问题
-  - [ ] 识别性能瓶颈
-  - [ ] 识别缺失功能（对比 OpenClaw/CC 的功能清单）
+- [x] `knowledge/self_analyzer.py`
+  - [x] 读取 MaxBot 自身源码（按优先级选关键文件）
+  - [x] LLM 驱动的问题识别（bug/性能/缺失功能/代码质量/安全）
+  - [x] AnalysisReport 生成（文本报告 + 分类统计）
+  - [x] 聚焦维度支持（focus 参数）
 
 ### 6.2 补丁生成
-- [ ] `knowledge/patch_generator.py`
-  - [ ] LLM 生成代码补丁
-  - [ ] Diff 格式输出
-  - [ ] 多文件补丁支持
-  - [ ] 补丁冲突检测
+- [x] `knowledge/patch_generator.py`
+  - [x] LLM 生成 unified diff 格式补丁
+  - [x] diff 提取（处理 markdown 包裹）
+  - [x] 多文件补丁支持（_extract_changed_files）
+  - [x] 补丁验证（git apply --check）
 
 ### 6.3 自动测试 & 应用
-- [ ] `knowledge/self_improver.py`
-  - [ ] 生成补丁后自动运行测试套件
-  - [ ] 测试通过 → 自动应用
-  - [ ] 测试失败 → 回滚 + 报告
-  - [ ] 改进历史记录（哪些改进生效了）
+- [x] `knowledge/self_improver.py`
+  - [x] 生成补丁后自动运行测试套件
+  - [x] 测试通过 → 保留
+  - [x] 测试失败 → 自动 git rollback + 报告
+  - [x] 改进历史记录（JSONL 格式）
+  - [x] 单问题修复 & 批量修复模式
 
-### 6.4 架构级改进（实验性）
-- [ ] 对比学习（分析 OpenClaw/CC 的架构优势）
-- [ ] 自动生成改进提案
-- [ ] 人工审批流程（重大改动）
-
-### 6.5 测试
-- [ ] tests/test_self_improve.py
-  - [ ] 自我分析测试
-  - [ ] 补丁生成测试
-  - [ ] 自动应用测试
-  - [ ] 回滚测试
+### 6.4 测试
+- [x] tests/test_self_improve.py — 21 个测试
+  - [x] Issue/AnalysisReport 数据结构测试
+  - [x] Patch 格式 & diff 提取测试
+  - [x] 补丁验证测试
+  - [x] 回滚测试（真实 git repo）
+  - [x] 历史记录读写测试
 
 ---
 
@@ -466,9 +462,9 @@ Phase 0 ✅ ──→ Phase 1 ✅ ──→ Phase 2（代码编辑）
 ## 当前进度
 
 ```
-[████████████████░░░░] Phase 0-4 完成 | 5/8 阶段
-当前阶段：Phase 5 — 知识吸收系统（核心创新）
-下一步：实现代码解析 + 能力提取 + 工具自动生成
+[████████████████████░] Phase 0-6 完成 | 7/8 阶段
+当前阶段：Phase 7 — 插件 SDK
+下一步：Plugin 基类 + 插件发现加载 + 管理 CLI
 ```
 
 ---
