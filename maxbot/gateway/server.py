@@ -1,415 +1,429 @@
 """
-Gateway 服务 — HTTP/WebSocket API
+网关系统 - HTTP/WebSocket Gateway
 
-参考 OpenClaw gateway/boot.ts + server-*.ts
-
-提供：
-- REST API：消息发送、会话管理、工具调用
-- WebSocket：实时对话
-- 多渠道消息路由
-- 认证（API Key + JWT）
-- Session 持久化（SQLite）
+提供 HTTP 和 WebSocket 接口，支持多平台接入
 """
 
 from __future__ import annotations
 
 import asyncio
 import json
-import threading
-import time
-import uuid
-from collections import OrderedDict
-from dataclasses import dataclass, field
-from pathlib import Path
-from typing import Any, Callable
-
-from fastapi import FastAPI, HTTPException, WebSocket, WebSocketDisconnect, Depends, Header
-from fastapi.middleware.cors import CORSMiddleware
+from dataclasses import dataclass
+from typing import Any
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Depends, HTTPException, Header
 from fastapi.responses import JSONResponse
-from pydantic import BaseModel, Field
-import uvicorn
+from pydantic import BaseModel
+from maxbot.core.agent_loop import Agent, AgentConfig
+from maxbot.multi_agent.coordinator import Coordinator
+from maxbot.gateway.auth import AuthManager
+from maxbot.utils.logger import get_logger
 
-from maxbot.core.agent_loop import Agent, AgentConfig, Message
-from maxbot.core.tool_registry import ToolRegistry
-from maxbot.core.memory import Memory
+# 获取网关日志器
+logger = get_logger("gateway")
+
+# 创建 FastAPI 应用
+app = FastAPI(title="MaxBot Gateway", version="1.0.0")
+
+# 全局认证管理器
+auth_manager = AuthManager()
 
 
-# ── 数据模型 ──────────────────────────────────────────────
+# ==================== 认证依赖 ====================
 
-class ChatRequest(BaseModel):
-    """聊天请求"""
+async def verify_api_key(x_api_key: str | None = Header(None)) -> bool:
+    """
+    验证 API Key 依赖
+
+    Args:
+        x_api_key: X-API-Key 请求头
+
+    Raises:
+        HTTPException: 认证失败
+    """
+    if not x_api_key:
+        raise HTTPException(status_code=401, detail="缺少 API Key")
+
+    if not auth_manager.verify_api_key(x_api_key):
+        raise HTTPException(status_code=401, detail="无效的 API Key")
+
+    return True
+
+
+async def verify_token(x_token: str | None = Header(None)) -> bool:
+    """
+    验证 Token 依赖
+
+    Args:
+        x_token: X-Token 请求头
+
+    Raises:
+        HTTPException: 认证失败
+    """
+    if not x_token:
+        raise HTTPException(status_code=401, detail="缺少 Token")
+
+    if not auth_manager.verify_token(x_token):
+        raise HTTPException(status_code=401, detail="无效或过期的 Token")
+
+    return True
+
+
+# ==================== 错误处理 ====================
+
+@app.exception_handler(Exception)
+async def global_exception_handler(request, exc):
+    """
+    全局异常处理器
+
+    Args:
+        request: 请求
+        exc: 异常
+
+    Returns:
+        错误响应
+    """
+    logger.error(f"未处理的异常: {exc}", exc_info=True)
+
+    return JSONResponse(
+        status_code=500,
+        content={
+            "success": False,
+            "error": str(exc),
+            "error_type": type(exc).__name__,
+        },
+    )
+
+
+# ==================== 数据模型 ====================
+
+class MessageRequest(BaseModel):
+    """消息请求"""
     message: str
     session_id: str | None = None
-    model: str | None = None
-    tools: list[str] | None = None  # 限制可用工具
+    skills_enabled: bool = True
 
 
-class ChatResponse(BaseModel):
-    """聊天响应"""
-    session_id: str
+class MessageResponse(BaseModel):
+    """消息响应"""
+    success: bool
     response: str
-    tool_calls: list[dict] = []
-    tokens_used: int = 0
-    duration_ms: int = 0
-
-
-class SessionInfo(BaseModel):
-    """会话信息"""
     session_id: str
-    created_at: float
-    message_count: int
-    last_active: float
+    error: str | None = None
 
 
-class ToolInfo(BaseModel):
-    """工具信息"""
-    name: str
+class TaskRequest(BaseModel):
+    """任务请求"""
     description: str
-    parameters: dict
+    agent_type: str = "worker"
+    priority: int = 0
 
 
-class GatewayConfig(BaseModel):
-    """Gateway 配置"""
-    host: str = "0.0.0.0"
-    port: int = 8765
-    api_keys: list[str] = Field(default_factory=list)  # 允许的 API Key
-    default_model: str = "mimo-v2-pro"
-    default_base_url: str | None = None
-    default_api_key: str | None = None
-    max_sessions: int = 100
-    cors_origins: list[str] = ["*"]
-    session_db_path: str | None = None  # None = 内存模式，否则 SQLite 路径
+class TaskResponse(BaseModel):
+    """任务响应"""
+    success: bool
+    task_id: str
+    error: str | None = None
 
 
-# ── 会话管理（线程安全）─────────────────────────────────
+# ==================== 网关配置 ====================
 
 @dataclass
-class Session:
-    session_id: str
-    agent: Agent
-    created_at: float = field(default_factory=time.time)
-    last_active: float = field(default_factory=time.time)
-    message_count: int = 0
+class GatewayConfig:
+    """网关配置"""
+    host: str = "0.0.0.0"
+    port: int = 8000
+    agent_config: AgentConfig | None = None
+    coordinator_enabled: bool = False
+    max_workers: int = 4
 
 
-class SessionManager:
-    """管理多个 Agent 会话（线程安全 + 可选持久化）"""
+# ==================== 网关类 ====================
 
-    def __init__(self, config: GatewayConfig, registry: ToolRegistry):
+class MaxBotGateway:
+    """
+    MaxBot 网关
+
+    功能：
+    - HTTP API
+    - WebSocket 连接
+    - 会话管理
+    - 多 Agent 协作
+    """
+
+    def __init__(self, config: GatewayConfig):
+        """
+        初始化网关
+
+        Args:
+            config: 网关配置
+        """
         self.config = config
-        self.registry = registry
-        self._sessions: OrderedDict[str, Session] = OrderedDict()
-        self._lock = threading.Lock()
+        self._sessions: dict[str, Agent] = {}
+        self._coordinator: Coordinator | None = None
 
-        # 可选 SQLite 持久化
-        self._db_conn = None
-        if config.session_db_path:
-            self._init_persistence(config.session_db_path)
+        # 初始化协调器
+        if config.coordinator_enabled:
+            self._coordinator = Coordinator(max_workers=config.max_workers)
+            logger.info("协调器已启用")
 
-    def _init_persistence(self, db_path: str):
-        """初始化 SQLite 持久化"""
-        import sqlite3
-        path = Path(db_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
-        self._db_conn = sqlite3.connect(str(path), check_same_thread=False)
-        self._db_conn.row_factory = sqlite3.Row
-        self._db_conn.executescript("""
-            CREATE TABLE IF NOT EXISTS sessions (
-                session_id TEXT PRIMARY KEY,
-                created_at REAL,
-                last_active REAL,
-                message_count INTEGER DEFAULT 0,
-                messages TEXT DEFAULT '[]'
-            );
-        """)
-        self._db_conn.commit()
+        # 注册路由
+        self._register_routes()
 
-    def get_or_create(
-        self,
-        session_id: str | None = None,
-        model: str | None = None,
-    ) -> Session:
-        with self._lock:
-            if session_id and session_id in self._sessions:
-                session = self._sessions[session_id]
-                session.last_active = time.time()
-                # 移动到末尾（LRU）
-                self._sessions.move_to_end(session_id)
-                return session
+        logger.info(f"网关初始化成功: {config.host}:{config.port}")
 
-            # 创建新会话
-            sid = session_id or str(uuid.uuid4())[:12]
-            agent_config = AgentConfig(
-                model=model or self.config.default_model,
-                base_url=self.config.default_base_url,
-                api_key=self.config.default_api_key,
-            )
-            agent = Agent(config=agent_config, registry=self.registry)
+    def _get_agent(self, session_id: str | None) -> Agent:
+        """
+        获取或创建 Agent
 
-            # 从数据库恢复历史（如果有）
-            if self._db_conn:
-                row = self._db_conn.execute(
-                    "SELECT messages FROM sessions WHERE session_id = ?", (sid,)
-                ).fetchone()
-                if row:
-                    try:
-                        saved_msgs = json.loads(row["messages"])
-                        # 恢复消息（保持 OpenAI API 格式，在 Agent 内部存储）
-                        for m in saved_msgs:
-                            restored = Message(
-                                role=m.get("role", "user"),
-                                content=m.get("content", ""),
-                                tool_calls=m.get("tool_calls", []),
-                                tool_call_id=m.get("tool_call_id"),
-                                name=m.get("name"),
-                            )
-                            agent.messages.append(restored)
-                    except Exception:
-                        pass
+        Args:
+            session_id: 会话 ID
 
-            session = Session(session_id=sid, agent=agent)
-            self._sessions[sid] = session
-            self._cleanup()
-            return session
+        Returns:
+            Agent 实例
+        """
+        if session_id and session_id in self._sessions:
+            return self._sessions[session_id]
 
-    def _cleanup(self):
-        """清理最旧的会话"""
-        if len(self._sessions) <= self.config.max_sessions:
-            return
-        to_remove = len(self._sessions) - self.config.max_sessions
-        for _ in range(to_remove):
-            sid, session = self._sessions.popitem(last=False)
-            # 持久化到数据库
-            self._persist_session(session)
+        # 创建新的 Agent
+        agent_config = self.config.agent_config or AgentConfig()
+        agent = Agent(config=agent_config, session_id=session_id)
 
-    def _persist_session(self, session: Session):
-        """保存会话到数据库"""
-        if not self._db_conn:
-            return
-        try:
-            msgs_json = json.dumps(
-                [m.to_api() if hasattr(m, "to_api") else m for m in session.agent.messages],
-                ensure_ascii=False,
-            )
-            self._db_conn.execute("""
-                INSERT OR REPLACE INTO sessions (session_id, created_at, last_active, message_count, messages)
-                VALUES (?, ?, ?, ?, ?)
-            """, (session.session_id, session.created_at, session.last_active, session.message_count, msgs_json))
-            self._db_conn.commit()
-        except Exception:
-            pass
+        if session_id:
+            self._sessions[session_id] = agent
 
-    def persist_all(self):
-        """持久化所有会话"""
-        with self._lock:
-            for session in self._sessions.values():
-                self._persist_session(session)
+        return agent
 
-    def list_sessions(self) -> list[SessionInfo]:
-        with self._lock:
-            return [
-                SessionInfo(
-                    session_id=s.session_id,
-                    created_at=s.created_at,
-                    message_count=s.message_count,
-                    last_active=s.last_active,
+    def _register_routes(self):
+        """注册路由"""
+
+        @app.get("/")
+        async def root():
+            """根路径"""
+            return {
+                "name": "MaxBot Gateway",
+                "version": "1.0.0",
+                "status": "running",
+            }
+
+        @app.post("/auth/token")
+        async def generate_token(request: dict):
+            """
+            生成 Token
+
+            使用 API Key 生成访问 Token
+            """
+            try:
+                api_key = request.get("api_key")
+                ttl = request.get("ttl")
+
+                if not api_key:
+                    raise HTTPException(status_code=400, detail="缺少 API Key")
+
+                token = auth_manager.generate_token(api_key, ttl=ttl)
+
+                return {
+                    "success": True,
+                    "token": token,
+                    "message": "Token 生成成功",
+                }
+
+            except ValueError as e:
+                raise HTTPException(status_code=401, detail=str(e))
+            except Exception as e:
+                logger.error(f"生成 Token 失败: {e}")
+                raise HTTPException(status_code=500, detail=str(e))
+
+        @app.post("/auth/verify", dependencies=[Depends(verify_api_key)])
+        async def verify_api_key_endpoint():
+            """验证 API Key"""
+            return {"success": True, "message": "API Key 有效"}
+
+        @app.get("/auth/stats", dependencies=[Depends(verify_api_key)])
+        async def get_auth_stats():
+            """获取认证统计信息"""
+            return auth_manager.get_stats()
+
+        @app.post("/chat", response_model=MessageResponse, dependencies=[Depends(verify_api_key)])
+        async def chat(request: MessageRequest):
+            """
+            聊天接口
+
+            处理用户消息，返回 Agent 响应
+            """
+            try:
+                logger.info(f"收到消息: {request.message[:50]}...")
+
+                # 获取 Agent
+                agent = self._get_agent(request.session_id)
+
+                # 执行消息
+                response = agent.run(request.message)
+
+                return MessageResponse(
+                    success=True,
+                    response=response,
+                    session_id=agent.config.session_id or "",
                 )
-                for s in self._sessions.values()
-            ]
 
-    def delete_session(self, session_id: str) -> bool:
-        with self._lock:
+            except Exception as e:
+                logger.error(f"处理消息失败: {e}")
+                return MessageResponse(
+                    success=False,
+                    response="",
+                    session_id=request.session_id or "",
+                    error=str(e),
+                )
+
+        @app.get("/sessions", dependencies=[Depends(verify_api_key)])
+        async def list_sessions():
+            """列出所有会话"""
+            return {
+                "total_sessions": len(self._sessions),
+                "sessions": list(self._sessions.keys()),
+            }
+
+        @app.delete("/sessions/{session_id}", dependencies=[Depends(verify_api_key)])
+        async def delete_session(session_id: str):
+            """删除会话"""
             if session_id in self._sessions:
-                session = self._sessions.pop(session_id)
-                self._persist_session(session)
-                return True
-            return False
+                del self._sessions[session_id]
+                logger.info(f"会话已删除: {session_id}")
+                return {"success": True}
+            else:
+                return {"success": False, "error": "会话不存在"}
 
-    def __len__(self) -> int:
-        return len(self._sessions)
+        @app.websocket("/ws")
+        async def websocket_endpoint(websocket: WebSocket):
+            """
+            WebSocket 端点
 
-
-# ── Gateway 服务 ──────────────────────────────────────────
-
-class GatewayServer:
-    """
-    Gateway 服务主类
-
-    用法：
-        server = GatewayServer(config=GatewayConfig(port=8765))
-        server.start()  # 阻塞启动
-    """
-
-    def __init__(
-        self,
-        config: GatewayConfig | None = None,
-        registry: ToolRegistry | None = None,
-    ):
-        self.config = config or GatewayConfig()
-        self.registry = registry or ToolRegistry()
-        self.session_manager = SessionManager(self.config, self.registry)
-        self.app = FastAPI(
-            title="MaxBot Gateway",
-            description="MaxBot 多平台消息网关",
-            version="0.1.0",
-        )
-        self._ws_connections: dict[str, WebSocket] = {}
-        self._setup_middleware()
-        self._setup_routes()
-
-        # 进程退出时持久化
-        import atexit
-        atexit.register(self.session_manager.persist_all)
-
-    def _setup_middleware(self):
-        self.app.add_middleware(
-            CORSMiddleware,
-            allow_origins=self.config.cors_origins,
-            allow_credentials=True,
-            allow_methods=["*"],
-            allow_headers=["*"],
-        )
-
-    def _verify_api_key(self, x_api_key: str | None = Header(None)) -> str | None:
-        """验证 API Key"""
-        if not self.config.api_keys:
-            return None  # 未配置则不验证
-        if not x_api_key or x_api_key not in self.config.api_keys:
-            raise HTTPException(status_code=401, detail="Invalid API Key")
-        return x_api_key
-
-    def _setup_routes(self):
-
-        @self.app.get("/health")
-        async def health():
-            return {"status": "ok", "sessions": len(self.session_manager)}
-
-        @self.app.post("/chat", response_model=ChatResponse)
-        async def chat(request: ChatRequest, _key: str | None = Depends(self._verify_api_key)):
-            session = self.session_manager.get_or_create(
-                session_id=request.session_id,
-                model=request.model,
-            )
-            session.message_count += 1
-
-            start = time.time()
-            response = session.agent.chat(request.message)
-            duration = int((time.time() - start) * 1000)
-
-            return ChatResponse(
-                session_id=session.session_id,
-                response=response,
-                duration_ms=duration,
-            )
-
-        @self.app.get("/sessions")
-        async def list_sessions(_key: str | None = Depends(self._verify_api_key)):
-            return self.session_manager.list_sessions()
-
-        @self.app.delete("/sessions/{session_id}")
-        async def delete_session(session_id: str, _key: str | None = Depends(self._verify_api_key)):
-            if self.session_manager.delete_session(session_id):
-                return {"deleted": True}
-            raise HTTPException(404, "Session not found")
-
-        @self.app.post("/sessions/{session_id}/reset")
-        async def reset_session(session_id: str, _key: str | None = Depends(self._verify_api_key)):
-            session = self.session_manager.get_or_create(session_id)
-            session.agent.reset()
-            return {"reset": True}
-
-        @self.app.get("/tools")
-        async def list_tools(_key: str | None = Depends(self._verify_api_key)):
-            return [
-                ToolInfo(name=t.name, description=t.description, parameters=t.parameters)
-                for t in self.registry.list_tools()
-            ]
-
-        @self.app.post("/tools/{tool_name}/call")
-        async def call_tool(
-            tool_name: str,
-            args: dict = {},
-            _key: str | None = Depends(self._verify_api_key),
-        ):
-            result = self.registry.call(tool_name, args)
-            try:
-                return json.loads(result)
-            except json.JSONDecodeError:
-                return {"result": result}
-
-        # ── WebSocket 实时对话 ─────────────────────────────
-
-        @self.app.websocket("/ws/{session_id}")
-        async def websocket_chat(websocket: WebSocket, session_id: str = "default"):
+            支持实时双向通信和心跳机制
+            """
             await websocket.accept()
-            self._ws_connections[session_id] = websocket
+            session_id = None
+            agent: Agent | None = None
+            last_ping = asyncio.get_event_loop().time()
+            heartbeat_task = None
+
+            logger.info("WebSocket 连接已建立")
+
+            async def send_heartbeat():
+                """发送心跳"""
+                while True:
+                    try:
+                        await asyncio.sleep(30)  # 每 30 秒发送一次心跳
+                        await websocket.send_json({"type": "heartbeat", "timestamp": asyncio.get_event_loop().time()})
+                    except:
+                        break
 
             try:
+                heartbeat_task = asyncio.create_task(send_heartbeat())
+
                 while True:
+                    # 接收消息
                     data = await websocket.receive_text()
-                    try:
-                        msg = json.loads(data)
-                        user_message = msg.get("message", data)
-                    except json.JSONDecodeError:
-                        user_message = data
+                    message_data = json.loads(data)
 
-                    session = self.session_manager.get_or_create(session_id)
-                    session.message_count += 1
+                    # 处理心跳
+                    if message_data.get("type") == "pong":
+                        last_ping = asyncio.get_event_loop().time()
+                        continue
 
-                    # 发送"正在处理"状态
-                    await websocket.send_json({"type": "status", "status": "thinking"})
+                    # 处理聊天消息
+                    message = message_data.get("message", "")
+                    session_id = message_data.get("session_id")
 
-                    # 调用 Agent（在线程池中运行同步代码）
-                    loop = asyncio.get_event_loop()
-                    response = await loop.run_in_executor(None, session.agent.chat, user_message)
+                    # 获取 Agent
+                    agent = self._get_agent(session_id)
+
+                    # 执行消息
+                    response = agent.run(message)
 
                     # 发送响应
                     await websocket.send_json({
                         "type": "response",
-                        "session_id": session_id,
-                        "message": response,
+                        "success": True,
+                        "response": response,
+                        "session_id": agent.config.session_id or "",
+                        "timestamp": asyncio.get_event_loop().time(),
                     })
 
             except WebSocketDisconnect:
-                self._ws_connections.pop(session_id, None)
+                logger.info("WebSocket 连接已断开")
+            except Exception as e:
+                logger.error(f"WebSocket 错误: {e}")
+                try:
+                    await websocket.send_json({
+                        "type": "error",
+                        "success": False,
+                        "error": str(e),
+                        "timestamp": asyncio.get_event_loop().time(),
+                    })
+                except:
+                    pass
+            finally:
+                if heartbeat_task:
+                    heartbeat_task.cancel()
+                    try:
+                        await heartbeat_task
+                    except asyncio.CancelledError:
+                        pass
 
-        # ── 批量消息 ─────────────────────────────────────
+        @app.get("/stats", dependencies=[Depends(verify_api_key)])
+        async def get_stats():
+            """获取统计信息"""
+            stats = {
+                "total_sessions": len(self._sessions),
+                "coordinator_enabled": self.config.coordinator_enabled,
+            }
 
-        @self.app.post("/batch")
-        async def batch_chat(
-            messages: list[ChatRequest],
-            _key: str | None = Depends(self._verify_api_key),
-        ):
-            results = []
-            for req in messages:
-                session = self.session_manager.get_or_create(req.session_id, req.model)
-                session.message_count += 1
-                response = session.agent.chat(req.message)
-                results.append(ChatResponse(
-                    session_id=session.session_id,
-                    response=response,
-                ))
-            return results
+            if self._coordinator:
+                stats["coordinator"] = self._coordinator.get_stats()
 
-    def start(self, host: str | None = None, port: int | None = None):
-        """启动服务（阻塞）"""
+            return stats
+
+    def run(self):
+        """运行网关"""
+        import uvicorn
+
+        logger.info(f"启动网关: {self.config.host}:{self.config.port}")
+
         uvicorn.run(
-            self.app,
-            host=host or self.config.host,
-            port=port or self.config.port,
+            app,
+            host=self.config.host,
+            port=self.config.port,
             log_level="info",
         )
 
-    def start_background(self, host: str | None = None, port: int | None = None):
-        """后台启动（非阻塞，返回线程）"""
-        def _run():
-            uvicorn.run(
-                self.app,
-                host=host or self.config.host,
-                port=port or self.config.port,
-                log_level="warning",
-            )
 
-        t = threading.Thread(target=_run, daemon=True)
-        t.start()
-        return t
+# ==================== 便捷函数 ====================
+
+def create_gateway(
+    host: str = "0.0.0.0",
+    port: int = 8000,
+    agent_config: AgentConfig | None = None,
+    coordinator_enabled: bool = False,
+    max_workers: int = 4,
+) -> MaxBotGateway:
+    """
+    创建网关
+
+    Args:
+        host: 监听地址
+        port: 监听端口
+        agent_config: Agent 配置
+        coordinator_enabled: 是否启用协调器
+        max_workers: 最大 Worker 数
+
+    Returns:
+        网关实例
+    """
+    config = GatewayConfig(
+        host=host,
+        port=port,
+        agent_config=agent_config,
+        coordinator_enabled=coordinator_enabled,
+        max_workers=max_workers,
+    )
+
+    return MaxBotGateway(config)

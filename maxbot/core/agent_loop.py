@@ -243,8 +243,7 @@ class Agent:
         # 初始化 SessionStore
         if self.config.session_store is None:
             self.config.session_store = SessionStore(
-                db_path=self.config.memory_db_path,
-                enabled=self.config.memory_enabled,
+                path=self.config.memory_db_path,
             )
 
         # 初始化技能管理器
