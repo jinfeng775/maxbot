@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request
 
 from maxbot.core import Agent, AgentConfig
 from maxbot.tools import registry
-from maxbot.gateway.server import GatewayServer, GatewayConfig
+from maxbot.gateway.server import MaxBotGateway, GatewayConfig, app
 from maxbot.gateway.channels.base import InboundMessage, OutboundMessage, MessageType
 
 
@@ -55,14 +55,17 @@ def main():
         sys.exit(1)
 
     # 创建 Gateway
+    agent_config = AgentConfig(
+        model=model,
+        base_url=base_url,
+        api_key=api_key,
+    )
+    
     config = GatewayConfig(
         port=port,
-        default_model=model,
-        default_base_url=base_url,
-        default_api_key=api_key,
+        agent_config=agent_config,
     )
-    server = GatewayServer(config=config, registry=registry)
-    app = server.app
+    server = MaxBotGateway(config=config)
 
     # 飞书集成
     feishu = None
@@ -87,12 +90,11 @@ def main():
             async def handle_feishu_message(msg: InboundMessage):
                 """飞书消息 → Agent 处理 → 回复"""
                 session_id = f"feishu-{msg.chat_id}"
-                session = server.session_manager.get_or_create(session_id)
+                session = server._get_agent(session_id)
 
                 prefix = f"[来自 {msg.sender_name}] " if msg.is_group else ""
                 try:
-                    response = session.agent.chat(prefix + msg.content)
-                    session.message_count += 1
+                    response = session.run(prefix + msg.content)
 
                     await feishu.send_message(OutboundMessage(
                         chat_id=msg.chat_id,
@@ -143,12 +145,11 @@ def main():
             async def handle_weixin_message(msg: InboundMessage):
                 """微信消息 → Agent 处理 → 回复"""
                 session_id = f"weixin-{msg.chat_id}"
-                session = server.session_manager.get_or_create(session_id)
+                session = server._get_agent(session_id)
 
                 prefix = f"[群聊/{msg.sender_name}] " if msg.is_group else ""
                 try:
-                    response = session.agent.chat(prefix + msg.content)
-                    session.message_count += 1
+                    response = session.run(prefix + msg.content)
 
                     await weixin.send_message(OutboundMessage(
                         chat_id=msg.chat_id,
@@ -187,6 +188,9 @@ def main():
 """)
 
     uvicorn.run(app, host="0.0.0.0", port=port, log_level="info")
+
+    # 使用 server.run() 启动
+    # server.run()
 
 
 if __name__ == "__main__":

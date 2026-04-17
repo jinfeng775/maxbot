@@ -32,6 +32,10 @@ class SessionStore:
         self._conn.row_factory = sqlite3.Row
         self._init_db()
 
+        # 持久记忆（与会话存储同目录）
+        from maxbot.core.memory import Memory
+        self.memory = Memory(path=self.path.parent / "memory.db")
+
     def _init_db(self):
         self._conn.executescript("""
             CREATE TABLE IF NOT EXISTS sessions (

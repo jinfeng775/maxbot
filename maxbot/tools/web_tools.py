@@ -28,7 +28,7 @@ def _brave_search(query: str, count: int, api_key: str) -> str:
     })
     try:
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+            data = json.loads(resp.read().decode('utf-8'))
         results = []
         for r in data.get("web", {}).get("results", [])[:count]:
             results.append({
@@ -47,7 +47,7 @@ def _ddg_search(query: str, count: int) -> str:
     try:
         req = urllib.request.Request(url, headers={"User-Agent": "MaxBot/0.1"})
         with urllib.request.urlopen(req, timeout=10) as resp:
-            data = json.loads(resp.read())
+            data = json.loads(resp.read().decode('utf-8'))
         results = []
         if data.get("AbstractText"):
             results.append({"title": data.get("Heading", ""), "text": data["AbstractText"], "source": data.get("AbstractURL", "")})

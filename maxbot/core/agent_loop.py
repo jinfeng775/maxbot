@@ -210,7 +210,12 @@ class Agent:
             session_id: 会话 ID（可选）
         """
         self.config = config or AgentConfig()
-        self._registry = registry
+        # 如果没有传入 registry，使用全局 registry
+        if registry is None:
+            from maxbot.tools import registry as global_registry
+            self._registry = global_registry
+        else:
+            self._registry = registry
         
         # 优化：使用消息管理器
         self._message_manager = MessageManager()
@@ -293,10 +298,10 @@ class Agent:
             # 优化：使用消息管理器加载消息
             messages = [
                 Message(**msg) if isinstance(msg, dict) else msg
-                for msg in session.get("messages", [])
+                for msg in session.messages
             ]
             self._message_manager.extend(messages)
-            self._conversation_turns = session.get("conversation_turns", 0)
+            self._conversation_turns = session.metadata.get("conversation_turns", 0)
             logger.info(f"历史会话加载成功: {self._message_manager.get_message_count()} 条消息, {self._conversation_turns} 次轮询")
         else:
             logger.debug(f"未找到历史会话: {self.config.session_id}")
@@ -307,12 +312,14 @@ class Agent:
             return
 
         logger.debug(f"保存会话: {self.config.session_id}, {self._message_manager.get_message_count()} 条消息")
-        self.config.session_store.save(
+        # 确保 session 存在
+        existing = self.config.session_store.get(self.config.session_id)
+        if not existing:
+            self.config.session_store.create(self.config.session_id)
+
+        self.config.session_store.save_messages(
             self.config.session_id,
-            {
-                "messages": [msg.to_api() for msg in self._message_manager.get_messages()],
-                "conversation_turns": self._conversation_turns,
-            },
+            [msg.to_api() for msg in self._message_manager.get_messages()],
         )
 
     def _call_memory_tool(self, args: dict[str, Any]) -> str:
@@ -321,19 +328,34 @@ class Agent:
         logger.debug(f"调用 memory 工具: action={action}")
 
         if action == "set":
-            return self.config.session_store.memory.set(
+            self.config.session_store.memory.set(
                 key=args.get("key"),
                 value=args.get("value"),
                 category=args.get("category", "memory"),
             )
+            return json.dumps({"ok": True}, ensure_ascii=False)
         elif action == "get":
-            return self.config.session_store.memory.get(key=args.get("key"))
+            value = self.config.session_store.memory.get(key=args.get("key"))
+            return json.dumps({"key": args.get("key"), "value": value}, ensure_ascii=False)
         elif action == "search":
-            return self.config.session_store.memory.search(query=args.get("query"))
+            entries = self.config.session_store.memory.search(query=args.get("query"))
+            return json.dumps(
+                [{"key": e.key, "value": e.value, "category": e.category,
+                  "created_at": e.created_at, "updated_at": e.updated_at}
+                 for e in entries],
+                ensure_ascii=False,
+            )
         elif action == "delete":
-            return self.config.session_store.memory.delete(key=args.get("key"))
+            ok = self.config.session_store.memory.delete(key=args.get("key"))
+            return json.dumps({"ok": ok}, ensure_ascii=False)
         elif action == "list":
-            return self.config.session_store.memory.list()
+            entries = self.config.session_store.memory.list_all()
+            return json.dumps(
+                [{"key": e.key, "value": e.value, "category": e.category,
+                  "created_at": e.created_at, "updated_at": e.updated_at}
+                 for e in entries],
+                ensure_ascii=False,
+            )
         else:
             logger.warning(f"未知的 memory 操作: {action}")
             return json.dumps({"error": f"未知操作: {action}"}, ensure_ascii=False)
@@ -342,6 +364,14 @@ class Agent:
         """调用工具"""
         function_name = tool_call.get("function", {}).get("name")
         arguments = tool_call.get("function", {}).get("arguments", {})
+
+        # arguments 可能是 JSON 字符串（来自 API），需要解析为 dict
+        if isinstance(arguments, str):
+            try:
+                arguments = json.loads(arguments) if arguments.strip() else {}
+            except (json.JSONDecodeError, ValueError):
+                logger.warning(f"工具参数 JSON 解析失败: {arguments[:200]}")
+                arguments = {}
 
         # 内置 memory 工具
         if function_name == "memory":
@@ -557,11 +587,21 @@ class Agent:
         # 处理响应
         assistant_message = response.choices[0].message
 
-        # 保存 assistant 消息
+        # 保存 assistant 消息（将 OpenAI SDK 对象转为 dict 以支持 JSON 序列化）
+        tool_calls_dicts = []
+        for tc in (assistant_message.tool_calls or []):
+            tool_calls_dicts.append({
+                "id": tc.id,
+                "type": tc.type,
+                "function": {
+                    "name": tc.function.name,
+                    "arguments": tc.function.arguments,
+                },
+            })
         msg = Message(
             role="assistant",
             content=assistant_message.content or "",
-            tool_calls=assistant_message.tool_calls or [],
+            tool_calls=tool_calls_dicts,
         )
         self._message_manager.append(msg)
 
@@ -571,9 +611,13 @@ class Agent:
             logger.info(f"收到 {len(assistant_message.tool_calls)} 个工具调用")
 
             for tool_call in assistant_message.tool_calls:
-                # 获取工具名称和参数
-                tool_name = tool_call.get("function", {}).get("name", "")
-                tool_args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                # 获取工具名称和参数（OpenAI SDK 返回的是对象，不是 dict）
+                tool_name = tool_call.function.name
+                try:
+                    tool_args = json.loads(tool_call.function.arguments)
+                except (json.JSONDecodeError, ValueError) as e:
+                    logger.error(f"工具参数 JSON 解析失败: {tool_name}, 参数: {tool_call.function.arguments[:200]}, 错误: {e}")
+                    tool_args = {}
                 
                 # 检测重复性工作
                 is_repetitive, warning_msg = self._detect_repetitive_work(tool_name, tool_args)
@@ -584,14 +628,20 @@ class Agent:
                     self._save_session()
                     logger.warning(f"检测到重复性工作: {tool_name}")
                 
-                # 调用工具
-                result = self._call_tool(tool_call)
+                # 调用工具（传入 dict 格式）
+                result = self._call_tool({
+                    "id": tool_call.id,
+                    "function": {
+                        "name": tool_name,
+                        "arguments": tool_call.function.arguments,
+                    },
+                })
 
                 # 保存工具响应
                 tool_response = Message(
                     role="tool",
                     content=result,
-                    tool_call_id=tool_call.get("id"),
+                    tool_call_id=tool_call.id,
                     name=tool_name,
                 )
                 self._message_manager.append(tool_response)
