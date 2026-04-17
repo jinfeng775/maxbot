@@ -21,6 +21,7 @@ from maxbot.core.tool_registry import ToolRegistry
 from maxbot.sessions import SessionStore
 from maxbot.config.config_loader import get_config, load_config
 from maxbot.utils.logger import get_logger
+from maxbot.skills import SkillManager
 
 # 获取 Agent 日志器
 logger = get_logger("agent")
@@ -63,6 +64,10 @@ class AgentConfig:
     session_store: Any | None = None
     auto_save: bool | None = None
     max_conversation_turns: int | None = None
+    # 技能系统配置
+    skills_enabled: bool | None = None
+    skills_dir: str | None = None
+    skill_injection_max_chars: int | None = None
 
     def __post_init__(self):
         """从配置文件加载默认值"""
@@ -90,7 +95,19 @@ class AgentConfig:
             ("session", "session_id", "session_id"),
             ("session", "auto_save", "auto_save"),
             ("session", "max_conversation_turns", "max_conversation_turns"),
+            ("skills", "auto_load", "skills_enabled"),
+            ("skills", "skills_dir", "skills_dir"),
         ]
+
+        # 从配置加载
+        for config_section, config_key, field_name in config_mappings:
+            if getattr(self, field_name) is None:
+                section = getattr(config, config_section)
+                setattr(self, field_name, getattr(section, config_key))
+
+        # 设置技能注入最大字符数（默认值）
+        if self.skill_injection_max_chars is None:
+            self.skill_injection_max_chars = 4000
 
         # 从配置加载
         for config_section, config_key, field_name in config_mappings:
@@ -230,6 +247,16 @@ class Agent:
                 enabled=self.config.memory_enabled,
             )
 
+        # 初始化技能管理器
+        self._skill_manager: SkillManager | None = None
+        if self.config.skills_enabled:
+            try:
+                self._skill_manager = SkillManager(skills_dir=self.config.skills_dir)
+                logger.info(f"技能管理器初始化成功: {len(self._skill_manager.list_skills())} 个技能")
+            except Exception as e:
+                logger.warning(f"技能管理器初始化失败: {e}")
+                self._skill_manager = None
+
         # 加载历史会话
         self._load_session()
 
@@ -335,6 +362,30 @@ class Agent:
             return True
         return False
 
+    def _get_enhanced_system_prompt(self, user_message: str) -> str:
+        """获取增强的系统提示（包含技能内容）"""
+        base_prompt = self.config.system_prompt
+
+        # 如果技能管理器未启用，返回基础提示
+        if not self._skill_manager:
+            return base_prompt
+
+        try:
+            # 获取匹配的技能内容
+            skill_content = self._skill_manager.get_injectable_content(
+                user_message,
+                max_chars=self.config.skill_injection_max_chars
+            )
+
+            if skill_content:
+                logger.info(f"注入技能内容: {len(skill_content)} 字符")
+                return f"{base_prompt}\n\n---\n\n相关技能指南:\n\n{skill_content}"
+
+            return base_prompt
+        except Exception as e:
+            logger.warning(f"获取技能内容失败: {e}")
+            return base_prompt
+
     def run(self, user_message: str) -> str:
         """
         运行对话
@@ -368,7 +419,17 @@ class Agent:
 
         # 调用 LLM
         def api_call():
-            messages = [m.to_api() for m in self._messages]
+            # 获取增强的系统提示
+            enhanced_system_prompt = self._get_enhanced_system_prompt(user_message)
+
+            # 构建消息列表
+            messages = [{"role": "system", "content": enhanced_system_prompt}]
+
+            # 添加对话历史（跳过系统消息，避免重复）
+            for m in self._messages:
+                if m.role != "system":
+                    messages.append(m.to_api())
+
             return self._client.chat.completions.create(
                 model=self.config.model,
                 messages=messages,
