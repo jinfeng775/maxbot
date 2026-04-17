@@ -75,6 +75,12 @@ maxbot/
 - [x] 上下文管理
 - [x] 内置工具（文件、Shell、Git、Web）
 - [x] CLI 交互界面
+- [x] **第一阶段重构完成**（详见 `docs/phase1_refactor_summary.md`）
+  - 统一日志系统
+  - 代码重复消除
+  - 配置加载优化
+  - 单元测试
+  - 日志集成
 
 ### Phase 2：多 Agent（进行中）
 - [ ] Coordinator + Worker 编排
