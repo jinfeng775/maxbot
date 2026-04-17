@@ -14,6 +14,7 @@ import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
+from concurrent.futures import ThreadPoolExecutor
 
 from openai import OpenAI
 
@@ -22,6 +23,9 @@ from maxbot.core.message_manager import Message, MessageManager
 from maxbot.core.context_compressor import ContextCompressor
 from maxbot.core.tool_cache import ToolCache, ToolPrioritizer
 from maxbot.core.performance_monitor import PerformanceMonitor
+from maxbot.core.tool_dependency_analyzer import ToolDependencyAnalyzer
+from maxbot.core.tool_cache_enhanced import ToolCache as EnhancedToolCache
+from maxbot.core.smart_retry import SmartRetry
 from maxbot.sessions import SessionStore
 from maxbot.config.config_loader import get_config, load_config
 from maxbot.utils.logger import get_logger
@@ -72,6 +76,13 @@ class AgentConfig:
     skills_enabled: bool | None = None
     skills_dir: str | None = None
     skill_injection_max_chars: int | None = None
+    
+    # 优化配置
+    enable_tool_cache: bool | None = None
+    enable_smart_retry: bool | None = None
+    enable_parallel_execution: bool | None = None
+    tool_cache_ttl: int | None = None
+    max_result_cache_size: int | None = None
 
     def __post_init__(self):
         """从配置文件加载默认值"""
@@ -235,8 +246,18 @@ class Agent:
             compress_ratio=0.5,
         )
         
-        # 优化：工具缓存
-        self._tool_cache = ToolCache(cache_ttl=300)  # 5分钟缓存
+        # 优化：工具缓存（使用增强版）
+        self._tool_cache = EnhancedToolCache(
+            cache_ttl=300,  # 工具列表缓存 TTL: 5 分钟
+            result_cache_ttl=60,  # 结果缓存 TTL: 1 分钟
+            max_result_cache_size=1000,  # 最大结果缓存条目数
+        )
+        
+        # 优化：智能重试
+        self._smart_retry = SmartRetry()
+        
+        # 优化：工具依赖分析器
+        self._dep_analyzer = ToolDependencyAnalyzer()
         
         # 优化：性能监控器
         self._performance_monitor = PerformanceMonitor()
