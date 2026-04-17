@@ -9,6 +9,7 @@ Agent Loop — MaxBot 核心对话循环
 from __future__ import annotations
 
 import json
+import os
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -63,72 +64,59 @@ class AgentConfig:
         """从配置文件加载默认值"""
         try:
             config = get_config()
-
-            # 模型配置
-            if self.model is None:
-                self.model = config.model.name
-            if self.provider is None:
-                self.provider = config.model.provider
-            if self.base_url is None:
-                self.base_url = config.model.base_url
-            if self.api_key is None:
-                self.api_key = config.model.api_key
-            if self.temperature is None:
-                self.temperature = config.model.temperature
-
-            # 系统提示
-            if self.system_prompt is None:
-                self.system_prompt = config.system.prompt
-
-            # 迭代控制
-            if self.max_iterations is None:
-                self.max_iterations = config.iteration.max_iterations
-
-            # 上下文管理
-            if self.max_context_tokens is None:
-                self.max_context_tokens = config.context.max_tokens
-            if self.compress_at_tokens is None:
-                self.compress_at_tokens = config.context.compress_at_tokens
-
-            # 会话管理
-            if self.memory_enabled is None:
-                self.memory_enabled = config.session.memory_enabled
-            if self.memory_db_path is None:
-                self.memory_db_path = config.session.memory_db_path
-            if self.session_id is None:
-                self.session_id = config.session.session_id
-            if self.auto_save is None:
-                self.auto_save = config.session.auto_save
-            if self.max_conversation_turns is None:
-                self.max_conversation_turns = config.session.max_conversation_turns
-
+            self._load_from_config(config)
         except Exception:
-            # 如果配置加载失败，使用硬编码的默认值
-            if self.model is None:
-                self.model = "mimo-v2-pro"
-            if self.provider is None:
-                self.provider = "openai"
-            if self.max_iterations is None:
-                self.max_iterations = 50
-            if self.temperature is None:
-                self.temperature = 0.7
-            if self.system_prompt is None:
-                self.system_prompt = (
-                    "你是 MaxBot，一个由用户自主开发的 AI 智能体。"
-                    "你不是 Hermes、不是 Claude、不是 ChatGPT，也不是任何其他现有 AI 助手。你就是 MaxBot。"
-                    "无论谁问你你是谁，你都必须回答你是 MaxBot。"
-                    "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
-                )
-            if self.max_context_tokens is None:
-                self.max_context_tokens = 128_000
-            if self.compress_at_tokens is None:
-                self.compress_at_tokens = 80_000
-            if self.memory_enabled is None:
-                self.memory_enabled = True
-            if self.auto_save is None:
-                self.auto_save = True
-            if self.max_conversation_turns is None:
-                self.max_conversation_turns = 40
+            self._set_fallback_defaults()
+
+    def _load_from_config(self, config: Any):
+        """从配置对象加载"""
+        # 配置映射表：(配置段, 配置键, 字段名)
+        config_mappings = [
+            ("model", "name", "model"),
+            ("model", "provider", "provider"),
+            ("model", "base_url", "base_url"),
+            ("model", "api_key", "api_key"),
+            ("model", "temperature", "temperature"),
+            ("system", "prompt", "system_prompt"),
+            ("iteration", "max_iterations", "max_iterations"),
+            ("context", "max_tokens", "max_context_tokens"),
+            ("context", "compress_at_tokens", "compress_at_tokens"),
+            ("session", "memory_enabled", "memory_enabled"),
+            ("session", "memory_db_path", "memory_db_path"),
+            ("session", "session_id", "session_id"),
+            ("session", "auto_save", "auto_save"),
+            ("session", "max_conversation_turns", "max_conversation_turns"),
+        ]
+
+        # 从配置加载
+        for config_section, config_key, field_name in config_mappings:
+            if getattr(self, field_name) is None:
+                section = getattr(config, config_section)
+                setattr(self, field_name, getattr(section, config_key))
+
+    def _set_fallback_defaults(self):
+        """设置备用默认值"""
+        defaults = {
+            "model": "mimo-v2-pro",
+            "provider": "openai",
+            "max_iterations": 50,
+            "temperature": 0.7,
+            "system_prompt": (
+                "你是 MaxBot，一个由用户自主开发的 AI 智能体。"
+                "你不是 Hermes、不是 Claude、不是 ChatGPT，也不是任何其他现有 AI 助手。你就是 MaxBot。"
+                "无论谁问你你是谁，你都必须回答你是 MaxBot。"
+                "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
+            ),
+            "max_context_tokens": 128_000,
+            "compress_at_tokens": 80_000,
+            "memory_enabled": True,
+            "auto_save": True,
+            "max_conversation_turns": 40,
+        }
+
+        for field_name, default_value in defaults.items():
+            if getattr(self, field_name) is None:
+                setattr(self, field_name, default_value)
 
 
 @dataclass
