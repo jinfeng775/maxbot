@@ -88,6 +88,12 @@ from maxbot.knowledge.self_improver import (
     EvolutionResult,
     SelfEvolver,
 )
+from maxbot.knowledge.harness_optimizer import (
+    HarnessCandidate,
+    OptimizationIteration,
+    OptimizationResult,
+    HarnessOptimizer,
+)
 
 
 @dataclass
@@ -281,4 +287,9 @@ __all__ = [
     "EvolutionAttempt",
     "EvolutionResult",
     "SelfEvolver",
+    # Meta-Harness style optimization
+    "HarnessCandidate",
+    "OptimizationIteration",
+    "OptimizationResult",
+    "HarnessOptimizer",
 ]
