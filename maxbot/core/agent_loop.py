@@ -20,6 +20,10 @@ from openai import OpenAI
 from maxbot.core.tool_registry import ToolRegistry
 from maxbot.sessions import SessionStore
 from maxbot.config.config_loader import get_config, load_config
+from maxbot.utils.logger import get_logger
+
+# 获取 Agent 日志器
+logger = get_logger("agent")
 
 
 def _retry_api_call(fn, max_attempts: int = 3, base_delay: float = 1.0):
@@ -194,6 +198,7 @@ class Agent:
         self,
         config: AgentConfig | None = None,
         registry: ToolRegistry | None = None,
+        session_id: str | None = None,
     ):
         """
         初始化 Agent
@@ -201,14 +206,22 @@ class Agent:
         Args:
             config: Agent 配置
             registry: 工具注册表（None = 使用全局 registry）
+            session_id: 会话 ID（可选）
         """
         self.config = config or AgentConfig()
         self._registry = registry
         self._messages: list[Message] = []
         self._conversation_turns = 0  # 会话轮询计数器
 
+        # 设置会话 ID
+        if session_id:
+            self.config.session_id = session_id
+
+        logger.info(f"Agent 初始化: 模型={self.config.model}, 会话ID={self.config.session_id}")
+
         # 初始化 OpenAI 客户端
         self._client = self._init_client()
+        logger.debug("OpenAI 客户端初始化成功")
 
         # 初始化 SessionStore
         if self.config.session_store is None:
@@ -236,8 +249,10 @@ class Agent:
     def _load_session(self):
         """加载历史会话"""
         if not self.config.session_id:
+            logger.debug("未设置会话 ID，跳过历史会话加载")
             return
 
+        logger.debug(f"加载历史会话: {self.config.session_id}")
         session = self.config.session_store.get(self.config.session_id)
         if session:
             self._messages = [
@@ -245,12 +260,16 @@ class Agent:
                 for msg in session.get("messages", [])
             ]
             self._conversation_turns = session.get("conversation_turns", 0)
+            logger.info(f"历史会话加载成功: {len(self._messages)} 条消息, {self._conversation_turns} 次轮询")
+        else:
+            logger.debug(f"未找到历史会话: {self.config.session_id}")
 
     def _save_session(self):
         """保存会话"""
         if not self.config.session_id or not self.config.auto_save:
             return
 
+        logger.debug(f"保存会话: {self.config.session_id}, {len(self._messages)} 条消息")
         self.config.session_store.save(
             self.config.session_id,
             {
@@ -262,6 +281,7 @@ class Agent:
     def _call_memory_tool(self, args: dict[str, Any]) -> str:
         """调用内置 memory 工具"""
         action = args.get("action")
+        logger.debug(f"调用 memory 工具: action={action}")
 
         if action == "set":
             return self.config.session_store.memory.set(
@@ -278,6 +298,7 @@ class Agent:
         elif action == "list":
             return self.config.session_store.memory.list()
         else:
+            logger.warning(f"未知的 memory 操作: {action}")
             return json.dumps({"error": f"未知操作: {action}"}, ensure_ascii=False)
 
     def _call_tool(self, tool_call: dict[str, Any]) -> str:
@@ -293,6 +314,7 @@ class Agent:
         if self._registry:
             return self._registry.call(function_name, arguments)
 
+        logger.error(f"未找到工具: {function_name}")
         return json.dumps({"error": f"未找到工具: {function_name}"}, ensure_ascii=False)
 
     def _compress_context(self):
@@ -325,6 +347,7 @@ class Agent:
         """
         # 添加用户消息
         self._messages.append(Message(role="user", content=user_message))
+        logger.debug(f"添加用户消息: {len(user_message)} 字符")
 
         # 检查会话轮询限制
         if self._check_conversation_limit():
@@ -333,11 +356,14 @@ class Agent:
                 "为避免无限循环，任务已终止。"
             )
             self._messages.append(Message(role="assistant", content=response))
+            logger.warning(f"会话轮询次数已超过限制: {self._conversation_turns}")
             return response
 
         # 检查上下文大小
         total_tokens = sum(len(m.content) for m in self._messages) // 4  # 粗略估计
+        logger.debug(f"当前上下文大小: {total_tokens} tokens")
         if total_tokens > self.config.max_context_tokens:
+            logger.info("上下文大小超过限制，触发压缩")
             self._compress_context()
 
         # 调用 LLM
@@ -350,7 +376,9 @@ class Agent:
                 tools=self._get_tools(),
             )
 
+        logger.debug("调用 LLM API")
         response = _retry_api_call(api_call)
+        logger.debug("LLM API 调用成功")
 
         # 处理响应
         assistant_message = response.choices[0].message
@@ -366,6 +394,7 @@ class Agent:
         # 处理工具调用
         if assistant_message.tool_calls:
             tool_responses = []
+            logger.info(f"收到 {len(assistant_message.tool_calls)} 个工具调用")
 
             for tool_call in assistant_message.tool_calls:
                 # 调用工具
@@ -383,11 +412,13 @@ class Agent:
                 tool_responses.append(result)
 
             # 继续对话（让 LLM 处理工具结果）
+            logger.debug("继续对话处理工具结果")
             return self.run("")  # 递归调用
 
         # 保存会话
         self._save_session()
 
+        logger.debug(f"对话完成，返回响应: {len(assistant_message.content or '')} 字符")
         return assistant_message.content or ""
 
     def _get_tools(self) -> list[dict]:
@@ -409,7 +440,9 @@ class Agent:
 
     def reset(self):
         """重置对话"""
+        logger.info(f"重置对话: {self.config.session_id}")
         self._messages = []
         self._conversation_turns = 0
         if self.config.session_id:
             self.config.session_store.delete(self.config.session_id)
+        logger.debug("对话重置完成")
