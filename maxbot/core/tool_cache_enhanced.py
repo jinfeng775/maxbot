@@ -267,7 +267,7 @@ class ToolCache:
         """
         return {
             name: {
-                "call_count: stats.call_count,
+                "call_count": stats.call_count,
                 "last_call_time": stats.last_call_time,
                 "total_time": stats.total_time,
                 "avg_time": stats.avg_time,
@@ -321,7 +321,7 @@ class ToolCache:
         
         for tool_name, stats in sorted_tools:
             lines.append(f"  {tool_name}:")
-            lines.append(f"    调用次数: {{stats.call_count}")
+            lines.append(f"    调用次数: {stats.call_count}")
             lines.append(f"    平均耗时: {stats.avg_time:.4f}s")
             lines.append(f"    总耗时: {stats.total_time:.4f}s")
             lines.append(f"    缓存命中: {stats.cache_hits}")
