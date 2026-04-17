@@ -119,7 +119,7 @@ class HarnessOptimizer:
     ):
         self.root = Path(project_root)
         self.work_dir = Path(work_dir or self.root / ".maxbot_harness_opt")
-        self.work_dir.mkdir(parents=True=True, exist_ok=True)
+        self.work_dir.mkdir(parents=True, exist_ok=True)
 
         # 创建文件系统结构
         self._setup_filesystem()
@@ -413,6 +413,6 @@ class HarnessOptimizer:
         """重置优化器"""
         if self.work_dir.exists():
             shutil.rmtree(self.work_dir)
-            self.work_dir.mkdir(parents=True=True)
+            self.work_dir.mkdir(parents=True)
             self._setup_filesystem()
         self._current_harness = None

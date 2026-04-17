@@ -1,0 +1,13 @@
+{
+  "name": "set_conversation_limit",
+  "version": 1,
+  "source_file": "maxbot/core/agent_loop.py",
+  "source_function": "AgentConfig",
+  "created_at": 1776393408.759632,
+  "confidence": 1.0,
+  "tags": [
+    "session",
+    "limit",
+    "control"
+  ]
+}
