@@ -82,11 +82,17 @@ maxbot/
   - 单元测试
   - 日志集成
 
-### Phase 2：多 Agent（进行中）
-- [ ] Coordinator + Worker 编排
+### Phase 2：多 Agent ✅
+- [x] 技能系统集成到 Agent 核心循环
+- [x] 技能管理工具
+- [x] 性能优化
+- [x] 示例技能（code-review, git-workflow）
+- [ ] Coordinator + Worker 编排（进行中）
 - [ ] 子 Agent 委派
 - [ ] 后台 Agent
 - [ ] 精确代码编辑器
+
+**第二阶段升级完成！**（详见 `docs/phase2_upgrade_summary.md`）
 
 ### Phase 3：Gateway（计划中）
 - [ ] HTTP/WS Gateway

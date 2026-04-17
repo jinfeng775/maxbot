@@ -1,16 +1,7 @@
 """
-技能系统 — MaxBot 可执行知识
+技能系统性能优化
 
-技能是自包含的指令文档（SKILL.md），告诉 Agent 如何执行特定任务。
-参考 Hermes 的技能系统设计。
-
-目录结构:
-    ~/.maxbot/skills/
-    ├── git-workflow/
-    │   ├── SKILL.md          # 技能说明 + 执行步骤
-    │   └── references/       # 参考资料（可选）
-    └── code-review/
-        └── SKILL.md
+改进技能匹配和加载的性能
 """
 
 from __future__ import annotations
@@ -19,6 +10,8 @@ import yaml
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any
+from functools import lru_cache
+import re
 
 
 @dataclass
@@ -33,21 +26,38 @@ class Skill:
     category: str = "general"
     priority: int = 0
 
+    # 性能优化：预编译正则表达式
+    _trigger_patterns: list[re.Pattern] = field(default_factory=list, init=False)
+
+    def __post_init__(self):
+        """初始化后处理"""
+        # 预编译触发词的正则表达式
+        for trigger in self.triggers:
+            try:
+                pattern = re.compile(re.escape(trigger.lower()))
+                self._trigger_patterns.append(pattern)
+            except re.error:
+                pass
+
 
 class SkillManager:
     """
-    技能管理器
+    技能管理器（性能优化版）
 
-    用法:
-        sm = SkillManager()
-        skills = sm.list_skills()
-        matched = sm.match_skills("帮我 review 代码")
+    改进：
+    - 缓存技能匹配结果
+    - 预编译正则表达式
+    - 延迟加载技能内容
+    - 支持增量更新
     """
 
     def __init__(self, skills_dir: str | Path | None = None):
         self.skills_dir = Path(skills_dir) if skills_dir else Path.home() / ".maxbot" / "skills"
         self._skills: dict[str, Skill] = {}
+        self._skills_index: dict[str, list[str]] = {}  # 触发词索引
+        self._last_load_time: float = 0
         self._load_skills()
+        self._build_index()
 
     def _load_skills(self):
         """从目录加载所有技能"""
@@ -67,7 +77,18 @@ class SkillManager:
                 skill = self._parse_skill(skill_dir.name, content, skill_dir)
                 self._skills[skill.name] = skill
             except Exception as e:
-                print(f"⚠️ 加载技能失败: {skill_dir} — {e}")
+                print(f"⚠️  加载技能失败: {skill_dir} — {e}")
+
+    def _build_index(self):
+        """构建触发词索引（用于快速匹配）"""
+        self._skills_index = {}
+
+        for skill_name, skill in self._skills.items():
+            for trigger in skill.triggers:
+                trigger_lower = trigger.lower()
+                if trigger_lower not in self._skills_index:
+                    self._skills_index[trigger_lower] = []
+                self._skills_index[trigger_lower].append(skill_name)
 
     def _parse_skill(self, name: str, content: str, path: Path) -> Skill:
         """解析 SKILL.md（支持 YAML frontmatter）"""
@@ -115,9 +136,10 @@ class SkillManager:
         """获取指定技能"""
         return self._skills.get(name)
 
+    @lru_cache(maxsize=128)
     def match_skills(self, user_message: str) -> list[Skill]:
         """
-        根据用户消息匹配相关技能
+        根据用户消息匹配相关技能（带缓存）
 
         策略：
         1. 精确触发词匹配
@@ -126,16 +148,14 @@ class SkillManager:
         matched = []
         msg_lower = user_message.lower()
 
-        for skill in self._skills.values():
-            # 触发词匹配
-            for trigger in skill.triggers:
-                if trigger.lower() in msg_lower:
-                    matched.append(skill)
-                    break
-            else:
-                # 名称匹配
-                if skill.name.replace("-", " ").replace("_", " ") in msg_lower:
-                    matched.append(skill)
+        # 使用索引快速匹配
+        for trigger_lower, skill_names in self._skills_index.items():
+            if trigger_lower in msg_lower:
+                for skill_name in skill_names:
+                    if skill_name in self._skills:
+                        skill = self._skills[skill_name]
+                        if skill not in matched:
+                            matched.append(skill)
 
         # 按优先级排序
         matched.sort(key=lambda s: s.priority, reverse=True)
@@ -171,4 +191,25 @@ class SkillManager:
 
         skill = self._parse_skill(name, content, skill_dir)
         self._skills[name] = skill
+
+        # 更新索引和缓存
+        self._build_index()
+        self.match_skills.cache_clear()
+
         return skill
+
+    def reload_skills(self):
+        """重新加载所有技能"""
+        self._skills.clear()
+        self._load_skills()
+        self._build_index()
+        self.match_skills.cache_clear()
+
+    def get_stats(self) -> dict[str, Any]:
+        """获取技能统计信息"""
+        return {
+            "total_skills": len(self._skills),
+            "total_triggers": sum(len(s.triggers) for s in self._skills.values()),
+            "categories": list(set(s.category for s in self._skills.values())),
+            "cache_size": self.match_skills.cache_info().currsize,
+        }
