@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import importlib.util
+import inspect
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -189,20 +190,57 @@ class AutoRegister:
 
 
 def _create_handler(cap: ExtractedCapability) -> Callable[..., str]:
-    """从 capability 创建 handler 函数"""
-    def handler(**kwargs) -> str:
-        # The handler code is a string — compile and execute it
-        local_ns: dict[str, Any] = {}
-        try:
-            exec(cap.handler_code, {}, local_ns)
-            # Find the function (first callable)
-            for name, obj in local_ns.items():
-                if callable(obj) and not name.startswith("_"):
-                    return obj(**kwargs)
-            return json.dumps({"error": "No handler function found in generated code"})
-        except Exception as e:
-            return json.dumps({"error": str(e)}, ensure_ascii=False)
+    """
+    从 capability 创建 handler 函数
 
-    handler.__name__ = cap.name
-    handler.__doc__ = cap.description
-    return handler
+    生成的 handler 代码通常有特定的签名模式：
+    - def handle_xxx(args, agent):  # args 是参数字典，agent 是 Agent 实例
+    - def handle_xxx(**kwargs):     # 直接接受关键字参数
+
+    这个包装器会自动适配不同的签名模式。
+    """
+    # 编译 handler 代码，提取实际的 handler 函数
+    local_ns: dict[str, Any] = {}
+    exec(cap.handler_code, {}, local_ns)
+
+    # 找到 handler 函数
+    actual_handler = None
+    for name, obj in local_ns.items():
+        if callable(obj) and not name.startswith("_"):
+            actual_handler = obj
+            break
+
+    if actual_handler is None:
+        def error_handler(**kwargs) -> str:
+            return json.dumps({"error": "No handler function found in generated code"})
+        return error_handler
+
+    # 检查 handler 的签名
+    sig = inspect.signature(actual_handler)
+    params = list(sig.parameters.keys())
+
+    # 创建包装器
+    def wrapper(**kwargs) -> str:
+        try:
+            # 情况 1: handler 的第一个参数是 "args"（参数字典）
+            if params and params[0] == "args":
+                # 将 kwargs 作为 args 传递
+                if len(params) == 1:
+                    # 只有 args 参数
+                    return actual_handler(kwargs)
+                elif len(params) == 2 and params[1] == "agent":
+                    # args 和 agent 参数
+                    agent = kwargs.get("agent")
+                    return actual_handler(kwargs, agent)
+                else:
+                    # 其他情况，直接传所有参数
+                    return actual_handler(**kwargs)
+            else:
+                # 情况 2: handler 直接接受关键字参数
+                return actual_handler(**kwargs)
+        except Exception as e:
+            return json.dumps({"error": str(e), "handler": cap.name}, ensure_ascii=False)
+
+    wrapper.__name__ = cap.name
+    wrapper.__doc__ = cap.description
+    return wrapper
