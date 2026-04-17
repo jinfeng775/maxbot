@@ -1,7 +1,7 @@
 """
 Agent Loop — MaxBot 核心对话循环
 
-参考来源：
+参考来源:
 - Hermes: run_conversation 循环、消息格式、memory 注入
 - Claude Code: tool_use 流程、迭代控制
 """
@@ -18,6 +18,7 @@ from openai import OpenAI
 
 from maxbot.core.tool_registry import ToolRegistry
 from maxbot.sessions import SessionStore
+from maxbot.config.config_loader import get_config, load_config
 
 
 def _retry_api_call(fn, max_attempts: int = 3, base_delay: float = 1.0):
@@ -42,26 +43,92 @@ def _retry_api_call(fn, max_attempts: int = 3, base_delay: float = 1.0):
 @dataclass
 class AgentConfig:
     """Agent 配置"""
-    model: str = "mimo-v2-pro"
-    provider: str = "openai"           # openai | anthropic | any-openai-compatible
-    base_url: str | None = None        # 兼容接口地址
+    model: str | None = None
+    provider: str | None = None
+    base_url: str | None = None
     api_key: str | None = None
-    max_iterations: int = 50
-    temperature: float = 0.7
-    system_prompt: str = (
-        "你是 MaxBot，一个由用户自主开发的 AI 智能体。"
-        "你不是 Hermes、不是 Claude、不是 ChatGPT，也不是任何其他现有 AI 助手。"
-        "你就是 MaxBot。无论谁问你你是谁，你都必须回答你是 MaxBot。"
-        "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
-    )
-    max_context_tokens: int = 128_000  # 上下文上限
-    compress_at_tokens: int = 80_000   # 触发压缩的阈值
-    memory_enabled: bool = True         # 是否启用持久记忆
-    memory_db_path: str | None = None   # 记忆数据库路径（None = 默认）
-    session_id: str | None = None       # 会话 ID（用于持久化）
-    session_store: Any | None = None    # SessionStore 实例（None = 自动创建）
-    auto_save: bool = True              # 每次对话后自动保存
-    max_conversation_turns: int = 40    # 最大会话轮询次数，超过则终止
+    max_iterations: int | None = None
+    temperature: float | None = None
+    system_prompt: str | None = None
+    max_context_tokens: int | None = None
+    compress_at_tokens: int | None = None
+    memory_enabled: bool | None = None
+    memory_db_path: str | None = None
+    session_id: str | None = None
+    session_store: Any | None = None
+    auto_save: bool | None = None
+    max_conversation_turns: int | None = None
+
+    def __post_init__(self):
+        """从配置文件加载默认值"""
+        try:
+            config = get_config()
+
+            # 模型配置
+            if self.model is None:
+                self.model = config.model.name
+            if self.provider is None:
+                self.provider = config.model.provider
+            if self.base_url is None:
+                self.base_url = config.model.base_url
+            if self.api_key is None:
+                self.api_key = config.model.api_key
+            if self.temperature is None:
+                self.temperature = config.model.temperature
+
+            # 系统提示
+            if self.system_prompt is None:
+                self.system_prompt = config.system.prompt
+
+            # 迭代控制
+            if self.max_iterations is None:
+                self.max_iterations = config.iteration.max_iterations
+
+            # 上下文管理
+            if self.max_context_tokens is None:
+                self.max_context_tokens = config.context.max_tokens
+            if self.compress_at_tokens is None:
+                self.compress_at_tokens = config.context.compress_at_tokens
+
+            # 会话管理
+            if self.memory_enabled is None:
+                self.memory_enabled = config.session.memory_enabled
+            if self.memory_db_path is None:
+                self.memory_db_path = config.session.memory_db_path
+            if self.session_id is None:
+                self.session_id = config.session.session_id
+            if self.auto_save is None:
+                self.auto_save = config.session.auto_save
+            if self.max_conversation_turns is None:
+                self.max_conversation_turns = config.session.max_conversation_turns
+
+        except Exception:
+            # 如果配置加载失败，使用硬编码的默认值
+            if self.model is None:
+                self.model = "mimo-v2-pro"
+            if self.provider is None:
+                self.provider = "openai"
+            if self.max_iterations is None:
+                self.max_iterations = 50
+            if self.temperature is None:
+                self.temperature = 0.7
+            if self.system_prompt is None:
+                self.system_prompt = (
+                    "你是 MaxBot，一个由用户自主开发的 AI 智能体。"
+                    "你不是 Hermes、不是 Claude、不是 ChatGPT，也不是任何其他现有 AI 助手。你就是 MaxBot。"
+                    "无论谁问你你是谁，你都必须回答你是 MaxBot。"
+                    "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
+                )
+            if self.max_context_tokens is None:
+                self.max_context_tokens = 128_000
+            if self.compress_at_tokens is None:
+                self.compress_at_tokens = 80_000
+            if self.memory_enabled is None:
+                self.memory_enabled = True
+            if self.auto_save is None:
+                self.auto_save = True
+            if self.max_conversation_turns is None:
+                self.max_conversation_turns = 40
 
 
 @dataclass
@@ -75,7 +142,7 @@ class Message:
     metadata: dict = field(default_factory=dict)
 
     def to_api(self) -> dict:
-        """转成 OpenAI API 格式"""
+        """转换成 OpenAI API 格式"""
         msg: dict[str, Any] = {"role": self.role, "content": self.content}
         if self.tool_calls:
             msg["tool_calls"] = self.tool_calls
@@ -86,7 +153,7 @@ class Message:
         return msg
 
 
-# ── 内置 memory 工具（Agent 内部拦截，不走 registry）───
+# ─── 内置 memory 工具（Agent 内部拦截，不走 registry）──
 
 _MEMORY_TOOL_SCHEMA = {
     "type": "function",
@@ -127,428 +194,234 @@ _MEMORY_TOOL_SCHEMA = {
 
 class Agent:
     """
-    核心 Agent 循环
+    MaxBot Agent
 
-    用法：
-        # 最简用法（自动使用全局 registry + 默认 memory）
-        agent = Agent(config=AgentConfig(...))
-        response = agent.chat("你好")
-
-        # 传入自定义 registry
-        agent = Agent(config=AgentConfig(...), registry=my_registry)
-
-        # 禁用 memory
-        agent = Agent(config=AgentConfig(..., memory_enabled=False))
+    用法:
+        config = AgentConfig()
+        agent = Agent(config=config)
+        response = agent.run("帮我分析这个项目")
     """
 
     def __init__(
         self,
-        config: AgentConfig,
+        config: AgentConfig | None = None,
         registry: ToolRegistry | None = None,
-        memory: Any | None = None,  # Memory 实例，None = 自动创建
-        session_store: SessionStore | None = None,
     ):
-        self.config = config
-
-        # ── 修复 1：默认使用全局 registry ──
-        if registry is None:
-            from maxbot.tools._registry import registry as global_registry
-            self.registry = global_registry
-        else:
-            self.registry = registry
-
-        self.messages: list[Message] = []
-        self._client: OpenAI | None = None
-        self._total_tokens_used: int = 0
-        self._conversation_turns: int = 0  # 会话轮询计数器
-
-        # ── 修复 2：集成 Memory 系统 ──
-        self._memory = None
-        if config.memory_enabled:
-            if memory is not None:
-                self._memory = memory
-            else:
-                from maxbot.core.memory import Memory
-                db_path = config.memory_db_path or str(Path.home() / ".maxbot" / "memory.db")
-                self._memory = Memory(path=db_path)
-
-        # ── 修复 3：会话持久化 ──
-        self._session_id = config.session_id
-        self._session_store = session_store or (
-            config.session_store if config.session_store else None
-        )
-        # 如果有 session_id 但没有 store，自动创建
-        if self._session_id and self._session_store is None:
-            self._session_store = SessionStore()
-        # 如果有 session_id，尝试加载已有会话
-        if self._session_id and self._session_store:
-            self._load_session()
-
-        # 回调
-        self.on_tool_start: Callable | None = None
-        self.on_tool_end: Callable | None = None
-        self.on_thinking: Callable | None = None
-        self.on_compress: Callable | None = None
-
-    @property
-    def client(self) -> OpenAI:
-        if self._client is None:
-            kwargs: dict[str, Any] = {}
-            if self.config.base_url:
-                kwargs["base_url"] = self.config.base_url
-            if self.config.api_key:
-                kwargs["api_key"] = self.config.api_key
-            self._client = OpenAI(**kwargs)
-        return self._client
-
-    @property
-    def memory(self):
-        """访问持久记忆"""
-        return self._memory
-
-    def chat(self, user_message: str) -> str:
-        """单次对话入口"""
-        # 检查会话轮询次数限制
-        self._conversation_turns += 1
-        if self._conversation_turns > self.config.max_conversation_turns:
-            return f"⚠️ 会话轮询次数已超过限制（{self.config.max_conversation_turns} 次），任务终止。。"
-
-        # 注入 system prompt（含 memory）
-        if not self.messages or self.messages[0].role != "system":
-            system_content = self.config.system_prompt
-            # 注入持久记忆
-            if self._memory:
-                mem_text = self._memory.export_text()
-                if mem_text:
-                    system_content += f"\n\n{mem_text}"
-            self.messages.insert(0, Message(role="system", content=system_content))
-
-        self.messages.append(Message(role="user", content=user_message))
-        response = self._run_loop()
-
-        # 自动保存会话
-        if self._session_id and self._session_store and self.config.auto_save:
-            self.save_session()
-
-        return response
-
-    def _run_loop(self) -> str:
-        """核心循环（带重试 + 上下文压缩）"""
-        iteration = 0
-        while iteration < self.config.max_iterations:
-            iteration += 1
-
-            # 上下文压缩检查
-            self._maybe_compress()
-
-            # 构建 API 请求
-            api_messages = [m.to_api() for m in self.messages]
-
-            # 工具 schema（含 memory 工具）
-            tool_schemas = self.registry.get_schemas()
-            if self._memory:
-                tool_schemas.append(_MEMORY_TOOL_SCHEMA)
-
-            kwargs: dict[str, Any] = {
-                "model": self.config.model,
-                "messages": api_messages,
-                "temperature": self.config.temperature,
-            }
-            if tool_schemas:
-                kwargs["tools"] = tool_schemas
-
-            # 调用 LLM（带重试）
-            try:
-                response = _retry_api_call(
-                    lambda: self.client.chat.completions.create(**kwargs),
-                    max_attempts=3,
-                )
-            except Exception as e:
-                return f"API 调用失败: {e}"
-
-            choice = response.choices[0]
-            msg = choice.message
-
-            # 追踪 token 使用
-            if hasattr(response, "usage") and response.usage:
-                self._total_tokens_used += response.usage.total_tokens
-
-            # 纯文本回复
-            if not msg.tool_calls:
-                assistant_msg = Message(role="assistant", content=msg.content or "")
-                self.messages.append(assistant_msg)
-                # 自动提取重要信息存入 memory
-                self._auto_extract_memory(user_message=None, response=msg.content or "")
-                return msg.content or ""
-
-            # 工具调用
-            tool_calls = []
-            for tc in msg.tool_calls:
-                tool_calls.append({
-                    "id": tc.id,
-                    "type": "function",
-                    "function": {
-                        "name": tc.function.name,
-                        "arguments": tc.function.arguments,
-                    },
-                })
-
-            assistant_msg = Message(role="assistant", content=msg.content or "", tool_calls=tool_calls)
-            self.messages.append(assistant_msg)
-
-            # 执行工具
-            for tc in msg.tool_calls:
-                name = tc.function.name
-                try:
-                    args = json.loads(tc.function.arguments)
-                except json.JSONDecodeError:
-                    args = {}
-
-                # ── 拦截 memory 工具调用 ──
-                if name == "memory" and self._memory:
-                    result = self._handle_memory_call(args)
-                else:
-                    if self.on_tool_start:
-                        self.on_tool_start(name, args)
-                    result = self.registry.call(name, args)
-                    if self.on_tool_end:
-                        self.on_tool_end(name, result)
-
-                tool_msg = Message(
-                    role="tool",
-                    content=result,
-                    tool_call_id=tc.id,
-                    name=name,
-                )
-                self.messages.append(tool_msg)
-
-        # 超过最大迭代次数
-        return "（已达到最大迭代次数，任务可能未完成）"
-
-    def _handle_memory_call(self, args: dict) -> str:
-        """处理 memory 工具调用"""
-        action = args.get("action", "")
-        try:
-            if action == "set":
-                key = args["key"]
-                value = args["value"]
-                category = args.get("category", "memory")
-                self._memory.set(key, value, category)
-                return json.dumps({"success": True, "key": key})
-
-            elif action == "get":
-                key = args["key"]
-                value = self._memory.get(key)
-                return json.dumps({"key": key, "value": value})
-
-            elif action == "search":
-                query = args["query"]
-                entries = self._memory.search(query)
-                return json.dumps({
-                    "results": [
-                        {"key": e.key, "value": e.value, "category": e.category}
-                        for e in entries
-                    ]
-                })
-
-            elif action == "delete":
-                key = args["key"]
-                deleted = self._memory.delete(key)
-                return json.dumps({"success": deleted, "key": key})
-
-            elif action == "list":
-                category = args.get("category")
-                entries = self._memory.list_all(category)
-                return json.dumps({
-                    "entries": [
-                        {"key": e.key, "value": e.value, "category": e.category}
-                        for e in entries
-                    ]
-                })
-
-            else:
-                return json.dumps({"error": f"未知 memory 操作: {action}"})
-
-        except Exception as e:
-            return json.dumps({"error": str(e)})
-
-    def _auto_extract_memory(self, user_message: str | None, response: str):
         """
-        自动提取重要信息存入 memory（简单启发式）
+        初始化 Agent
 
-        规则：
-        - 用户说"记住..." → 自动存储
-        - 用户说"我叫/我是/我的名字是..." → 存储用户信息
-        - 不做 LLM 调用，纯字符串匹配，零成本
+        Args:
+            config: Agent 配置
+            registry: 工具注册表（None = 使用全局 registry）
         """
-        if not self._memory:
-            return
+        self.config = config or AgentConfig()
+        self._registry = registry
+        self._messages: list[Message] = []
+        self._conversation_turns = 0  # 会话轮询计数器
 
-        # 取最近的 user 消息
-        user_msg = ""
-        for m in reversed(self.messages):
-            if m.role == "user":
-                user_msg = m.content
-                break
+        # 初始化 OpenAI 客户端
+        self._client = self._init_client()
 
-        if not user_msg:
-            return
+        # 初始化 SessionStore
+        if self.config.session_store is None:
+            self.config.session_store = SessionStore(
+                db_path=self.config.memory_db_path,
+                enabled=self.config.memory_enabled,
+            )
 
-        msg_lower = user_msg.lower()
+        # 加载历史会话
+        self._load_session()
 
-        # "记住 XXX"
-        for prefix in ("记住", "记住：", "记住:", "remember", "记住这个"):
-            if msg_lower.startswith(prefix):
-                fact = user_msg[len(prefix):].strip()
-                if fact:
-                    self._memory.set(f"fact_{int(time.time())}", fact, category="memory")
-                return
+    def _init_client(self) -> OpenAI:
+        """初始化 OpenAI 客户端"""
+        api_key = self.config.api_key or os.environ.get("MAXBOT_API_KEY")
+        if not api_key:
+            raise ValueError("未设置 API 密钥。请通过 config.api_key 或环境变量 MAXBOT_API_KEY 设置。")
 
-        # "我叫 XXX" / "我是 XXX" / "我的名字是 XXX"
-        import re
-        name_patterns = [
-            (r"(?:我叫|我的名字是|my name is)\s*(.+)", "user"),
-            (r"(?:我是|i am|i'm)\s+(.+)", "user"),
-        ]
-        for pattern, category in name_patterns:
-            m = re.search(pattern, user_msg, re.IGNORECASE)
-            if m:
-                value = m.group(1).strip().rstrip("。，.!！")
-                if value and len(value) < 100:
-                    self._memory.set("user_name", value, category=category)
-                return
+        client_kwargs = {"api_key": api_key}
 
-    def _maybe_compress(self):
-        """检查上下文大小，必要时压缩"""
-        total_chars = sum(len(m.content) for m in self.messages)
-        estimated = total_chars // 2
-        if estimated > self.config.compress_at_tokens:
-            self._compress_messages()
+        if self.config.base_url:
+            client_kwargs["base_url"] = self.config.base_url
 
-    def _compress_messages(self):
-        """压缩消息历史 — 保留 system + 最近 20 条"""
-        system_msgs = [m for m in self.messages if m.role == "system"]
-        non_system = [m for m in self.messages if m.role != "system"]
-
-        if len(non_system) <= 20:
-            return
-
-        to_compress = non_system[:-20]
-        kept = non_system[-20:]
-
-        # 生成简单摘要
-        topics = []
-        tools_used = []
-        for m in to_compress:
-            if m.role == "user" and len(m.content) > 10:
-                topics.append(m.content[:60])
-            elif m.role == "assistant" and m.tool_calls:
-                for tc in m.tool_calls:
-                    fname = tc.get("function", {}).get("name", "?")
-                    tools_used.append(fname)
-            elif m.role == "tool":
-                tools_used.append(m.name or "?")
-
-        summary_parts = []
-        if topics:
-            summary_parts.append(f"讨论了: {'; '.join(topics[:5])}")
-        if tools_used:
-            summary_parts.append(f"使用了工具: {', '.join(set(tools_used[:10]))}")
-        summary = "\n".join(summary_parts) if summary_parts else "（对话历史已压缩）"
-
-        self.messages = system_msgs + [
-            Message(role="user", content=f"[历史摘要 — 已压缩 {len(to_compress)} 条消息]\n{summary}")
-        ] + kept
-
-        if self.on_compress:
-            self.on_compress(len(to_compress))
-
-    def reset(self):
-        """重置对话（保留 memory 和 session）"""
-        self.messages.clear()
-        self._total_tokens_used = 0
-        self._conversation_turns = 0  # 重置会话轮询计数器
-
-    def save_session(self) -> bool:
-        """保存当前会话到数据库"""
-        if not self._session_id or not self._session_store:
-            return False
-        try:
-            # 确保 session 存在
-            session = self._session_store.get(self._session_id)
-            if not session:
-                # 从第一条 user 消息取标题
-                title = ""
-                for m in self.messages:
-                    if m.role == "user":
-                        title = m.content[:50]
-                        break
-                self._session_store.create(self._session_id, title=title)
-
-            # 保存消息
-            api_messages = [m.to_api() for m in self.messages]
-            self._session_store.save_messages(self._session_id, api_messages)
-            return True
-        except Exception as e:
-            print(f"⚠️ 保存会话失败: {e}")
-            return False
+        return OpenAI(**client_kwargs)
 
     def _load_session(self):
-        """从数据库加载会话"""
-        if not self._session_id or not self._session_store:
+        """加载历史会话"""
+        if not self.config.session_id:
             return
-        try:
-            session = self._session_store.get(self._session_id)
-            if session and session.messages:
-                self.messages = [
-                    Message(
-                        role=m.get("role", "user"),
-                        content=m.get("content", ""),
-                        tool_calls=m.get("tool_calls", []),
-                        tool_call_id=m.get("tool_call_id"),
-                        name=m.get("name"),
-                    )
-                    for m in session.messages
-                ]
-        except Exception as e:
-            print(f"⚠️ 加载会话失败: {e}")
 
-    def list_sessions(self, limit: int = 20) -> list[dict]:
-        """列出历史会话"""
-        if not self._session_store:
-            return []
-        sessions = self._session_store.list_sessions(limit)
-        return [
+        session = self.config.session_store.get(self.config.session_id)
+        if session:
+            self._messages = [
+                Message(**msg) if isinstance(msg, dict) else msg
+                for msg in session.get("messages", [])
+            ]
+            self._conversation_turns = session.get("conversation_turns", 0)
+
+    def _save_session(self):
+        """保存会话"""
+        if not self.config.session_id or not self.config.auto_save:
+            return
+
+        self.config.session_store.save(
+            self.config.session_id,
             {
-                "session_id": s.session_id,
-                "title": s.title,
-                "updated_at": s.updated_at,
-                "message_count": len(s.messages) if s.messages else 0,
-            }
-            for s in sessions
-        ]
-
-    def delete_session(self, session_id: str) -> bool:
-        """删除会话"""
-        if not self._session_store:
-            return False
-        return self._session_store.delete(session_id)
-
-    def get_history(self) -> list[dict]:
-        """获取完整对话历史"""
-        return [m.to_api() for m in self.messages]
-
-    def get_stats(self) -> dict:
-        """获取会话统计"""
-        return {
-            "total_messages": len(self.messages),
-            "total_tokens_used": self._total_tokens_used,
-            "memory_enabled": self._memory is not None,
-            "memory_entries": len(self._memory.list_all()) if self._memory else 0,
-            "roles": {
-                "system": sum(1 for m in self.messages if m.role == "system"),
-                "user": sum(1 for m in self.messages if m.role == "user"),
-                "assistant": sum(1 for m in self.messages if m.role == "assistant"),
-                "tool": sum(1 for m in self.messages if m.role == "tool"),
+                "messages": [msg.to_api() for msg in self._messages],
+                "conversation_turns": self._conversation_turns,
             },
-        }
+        )
+
+    def _call_memory_tool(self, args: dict[str, Any]) -> str:
+        """调用内置 memory 工具"""
+        action = args.get("action")
+
+        if action == "set":
+            return self.config.session_store.memory.set(
+                key=args.get("key"),
+                value=args.get("value"),
+                category=args.get("category", "memory"),
+            )
+        elif action == "get":
+            return self.config.session_store.memory.get(key=args.get("key"))
+        elif action == "search":
+            return self.config.session_store.memory.search(query=args.get("query"))
+        elif action == "delete":
+            return self.config.session_store.memory.delete(key=args.get("key"))
+        elif action == "list":
+            return self.config.session_store.memory.list()
+        else:
+            return json.dumps({"error": f"未知操作: {action}"}, ensure_ascii=False)
+
+    def _call_tool(self, tool_call: dict[str, Any]) -> str:
+        """调用工具"""
+        function_name = tool_call.get("function", {}).get("name")
+        arguments = tool_call.get("function", {}).get("arguments", {})
+
+        # 内置 memory 工具
+        if function_name == "memory":
+            return self._call_memory_tool(arguments)
+
+        # 注册表中的工具
+        if self._registry:
+            return self._registry.call(function_name, arguments)
+
+        return json.dumps({"error": f"未找到工具: {function_name}"}, ensure_ascii=False)
+
+    def _compress_context(self):
+        """压缩上下文（移除旧消息）"""
+        # 简单实现：保留最近的 N 条消息
+        keep_messages = 10
+        if len(self._messages) > keep_messages:
+            # 保留 system 消息和最近的消息
+            system_msgs = [m for m in self._messages if m.role == "system"]
+            recent_msgs = self._messages[-keep_messages:]
+            self._messages = system_msgs + recent_msgs
+
+    def _check_conversation_limit(self) -> bool:
+        """检查是否超过会话轮询限制"""
+        self._conversation_turns += 1
+
+        if self._conversation_turns > self.config.max_conversation_turns:
+            return True
+        return False
+
+    def run(self, user_message: str) -> str:
+        """
+        运行对话
+
+        Args:
+            user_message: 用户消息
+
+        Returns:
+            str: Agent 响应
+        """
+        # 添加用户消息
+        self._messages.append(Message(role="user", content=user_message))
+
+        # 检查会话轮询限制
+        if self._check_conversation_limit():
+            response = (
+                f"⚠️ 会话轮询次数已超过限制（{self.config.max_conversation_turns} 次）。"
+                "为避免无限循环，任务已终止。"
+            )
+            self._messages.append(Message(role="assistant", content=response))
+            return response
+
+        # 检查上下文大小
+        total_tokens = sum(len(m.content) for m in self._messages) // 4  # 粗略估计
+        if total_tokens > self.config.max_context_tokens:
+            self._compress_context()
+
+        # 调用 LLM
+        def api_call():
+            messages = [m.to_api() for m in self._messages]
+            return self._client.chat.completions.create(
+                model=self.config.model,
+                messages=messages,
+                temperature=self.config.temperature,
+                tools=self._get_tools(),
+            )
+
+        response = _retry_api_call(api_call)
+
+        # 处理响应
+        assistant_message = response.choices[0].message
+
+        # 保存 assistant 消息
+        msg = Message(
+            role="assistant",
+            content=assistant_message.content or "",
+            tool_calls=assistant_message.tool_calls or [],
+        )
+        self._messages.append(msg)
+
+        # 处理工具调用
+        if assistant_message.tool_calls:
+            tool_responses = []
+
+            for tool_call in assistant_message.tool_calls:
+                # 调用工具
+                result = self._call_tool(tool_call)
+
+                # 保存工具响应
+                tool_response = Message(
+                    role="tool",
+                    content=result,
+                    tool_call_id=tool_call.get("id"),
+                    name=tool_call.get("function", {}).get("name"),
+                )
+                self._messages.append(tool_response)
+
+                tool_responses.append(result)
+
+            # 继续对话（让 LLM 处理工具结果）
+            return self.run("")  # 递归调用
+
+        # 保存会话
+        self._save_session()
+
+        return assistant_message.content or ""
+
+    def _get_tools(self) -> list[dict]:
+        """获取可用工具列表"""
+        tools = []
+
+        # 添加内置 memory 工具
+        tools.append(_MEMORY_TOOL_SCHEMA)
+
+        # 添加注册表中的工具
+        if self._registry:
+            tools.extend(self._registry.get_schemas())
+
+        return tools
+
+    def get_messages(self) -> list[Message]:
+        """获取消息历史"""
+        return self._messages.copy()
+
+    def reset(self):
+        """重置对话"""
+        self._messages = []
+        self._conversation_turns = 0
+        if self.config.session_id:
+            self.config.session_store.delete(self.config.session_id)
