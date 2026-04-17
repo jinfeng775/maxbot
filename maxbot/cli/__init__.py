@@ -63,27 +63,9 @@ def main():
     tool_registry = registry if not args.no_tools else type(registry)()
     agent = Agent(config=config, registry=tool_registry)
 
-    # 设置回调（终端输出）
-    def on_tool_start(name, args):
-        tool_args = json.dumps(args, ensure_ascii=False)
-        if len(tool_args) > 80:
-            tool_args = tool_args[:80] + "..."
-        print(f"  🔧 {name}({tool_args})")
-
-    def on_tool_end(name, result):
-        preview = result[:100] if isinstance(result, str) else str(result)[:100]
-        print(f"  ✅ → {preview}")
-
-    def on_compress(count):
-        print(f"  📦 上下文已压缩 ({count} 条消息 → 摘要)")
-
-    agent.on_tool_start = on_tool_start
-    agent.on_tool_end = on_tool_end
-    agent.on_compress = on_compress
-
     # 非交互模式
     if args.message:
-        response = agent.chat(args.message)
+        response = agent.run(args.message)
         print(response)
         return
 
@@ -138,23 +120,24 @@ def main():
             continue
 
         if user_input == "/stats":
-            stats = agent.get_stats()
+            messages = agent.get_messages()
             print(f"\n  📊 会话统计:")
-            print(f"    总消息数: {stats['total_messages']}")
-            print(f"    Token 使用: {stats['total_tokens_used']}")
-            for role, count in stats["roles"].items():
-                if count > 0:
+            print(f"    总消息数: {len(messages)}")
+            print(f"    会话轮询次数: {agent._conversation_turns}")
+            if messages:
+                from collections import Counter
+                roles = Counter(m.role for m in messages)
+                for role, count in roles.items():
                     print(f"    {role}: {count}")
             print()
             continue
 
         if user_input == "/history":
-            history = agent.get_history()
-            print(f"\n  📜 对话历史 ({len(history)} 条):")
-            for i, m in enumerate(history[-10:], 1):
-                role = m["role"]
-                content = str(m.get("content", ""))[:60]
-                print(f"    {i}. [{role}] {content}")
+            messages = agent.get_messages()
+            print(f"\n  📜 对话历史 ({len(messages)} 条):")
+            for i, m in enumerate(messages[-10:], 1):
+                content = m.content[:60] if hasattr(m, 'content') else str(m)[:60]
+                print(f"    {i}. [{m.role}] {content}")
             print()
             continue
 
@@ -167,7 +150,7 @@ def main():
 
         # 普通对话
         print("  🤔 思考中...")
-        response = agent.chat(user_input)
+        response = agent.run(user_input)
         print(f"\n  🤖 {response}\n")
 
 
