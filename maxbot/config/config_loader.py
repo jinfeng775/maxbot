@@ -60,7 +60,7 @@ class SessionConfig:
     memory_db_path: str | None = None
     session_id: str | None = None
     auto_save: bool = True
-    max_conversation_turns: int = 40
+    max_conversation_turns: int = 140
 
 
 @dataclass

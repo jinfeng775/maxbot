@@ -18,6 +18,10 @@ from typing import Any, Callable
 from openai import OpenAI
 
 from maxbot.core.tool_registry import ToolRegistry
+from maxbot.core.message_manager import Message, MessageManager
+from maxbot.core.context_compressor import ContextCompressor
+from maxbot.core.tool_cache import ToolCache, ToolPrioritizer
+from maxbot.core.performance_monitor import PerformanceMonitor
 from maxbot.sessions import SessionStore
 from maxbot.config.config_loader import get_config, load_config
 from maxbot.utils.logger import get_logger
@@ -132,7 +136,7 @@ class AgentConfig:
             "compress_at_tokens": 80_000,
             "memory_enabled": True,
             "auto_save": True,
-            "max_conversation_turns": 40,
+            "max_conversation_turns": 140,
         }
 
         for field_name, default_value in defaults.items():
@@ -140,26 +144,6 @@ class AgentConfig:
                 setattr(self, field_name, default_value)
 
 
-@dataclass
-class Message:
-    """统一消息格式"""
-    role: str                          # system | user | assistant | tool
-    content: str = ""
-    tool_calls: list[dict] = field(default_factory=list)
-    tool_call_id: str | None = None
-    name: str | None = None
-    metadata: dict = field(default_factory=dict)
-
-    def to_api(self) -> dict:
-        """转换成 OpenAI API 格式"""
-        msg: dict[str, Any] = {"role": self.role, "content": self.content}
-        if self.tool_calls:
-            msg["tool_calls"] = self.tool_calls
-        if self.tool_call_id:
-            msg["tool_call_id"] = self.tool_call_id
-        if self.name:
-            msg["name"] = self.name
-        return msg
 
 
 # ─── 内置 memory 工具（Agent 内部拦截，不走 registry）──
@@ -227,8 +211,33 @@ class Agent:
         """
         self.config = config or AgentConfig()
         self._registry = registry
-        self._messages: list[Message] = []
+        
+        # 优化：使用消息管理器
+        self._message_manager = MessageManager()
         self._conversation_turns = 0  # 会话轮询计数器
+        self._last_progress_report_time = 0  # 上次进度汇报时间
+        self._progress_report_interval = 600  # 进度汇报间隔（秒）：10分钟 = 600秒
+        
+        # 效率优化：检测重复性工作
+        self._recent_tool_calls = []  # 最近的工具调用记录
+        self._max_recent_calls = 20  # 记录最近20次工具调用
+        self._duplicate_threshold = 3  # 连续重复3次相同调用视为重复
+        
+        # 优化：上下文压缩器
+        self._context_compressor = ContextCompressor(
+            max_tokens=self.config.max_context_tokens,
+            compress_at_tokens=self.config.compress_at_tokens,
+            compress_ratio=0.5,
+        )
+        
+        # 优化：工具缓存
+        self._tool_cache = ToolCache(cache_ttl=300)  # 5分钟缓存
+        
+        # 优化：性能监控器
+        self._performance_monitor = PerformanceMonitor()
+        
+        # 兼容性：保留 _messages 属性（内部使用 message_manager）
+        self._messages = []  # 不再使用，保留以兼容
 
         # 设置会话 ID
         if session_id:
@@ -281,12 +290,14 @@ class Agent:
         logger.debug(f"加载历史会话: {self.config.session_id}")
         session = self.config.session_store.get(self.config.session_id)
         if session:
-            self._messages = [
+            # 优化：使用消息管理器加载消息
+            messages = [
                 Message(**msg) if isinstance(msg, dict) else msg
                 for msg in session.get("messages", [])
             ]
+            self._message_manager.extend(messages)
             self._conversation_turns = session.get("conversation_turns", 0)
-            logger.info(f"历史会话加载成功: {len(self._messages)} 条消息, {self._conversation_turns} 次轮询")
+            logger.info(f"历史会话加载成功: {self._message_manager.get_message_count()} 条消息, {self._conversation_turns} 次轮询")
         else:
             logger.debug(f"未找到历史会话: {self.config.session_id}")
 
@@ -295,11 +306,11 @@ class Agent:
         if not self.config.session_id or not self.config.auto_save:
             return
 
-        logger.debug(f"保存会话: {self.config.session_id}, {len(self._messages)} 条消息")
+        logger.debug(f"保存会话: {self.config.session_id}, {self._message_manager.get_message_count()} 条消息")
         self.config.session_store.save(
             self.config.session_id,
             {
-                "messages": [msg.to_api() for msg in self._messages],
+                "messages": [msg.to_api() for msg in self._message_manager.get_messages()],
                 "conversation_turns": self._conversation_turns,
             },
         )
@@ -361,6 +372,99 @@ class Agent:
             return True
         return False
 
+    def _check_and_report_progress(self) -> str | None:
+        """
+        检查并汇报进度
+
+        Returns:
+            进度汇报消息（如果需要汇报）
+        """
+        current_time = time.time()
+        
+        # 检查是否需要汇报进度
+        if current_time - self._last_progress_report_time >= self._progress_report_interval:
+            self._last_progress_report_time = current_time
+            
+            # 计算进度信息
+            progress_report = (
+                f"⏳ 正在工作中... 已执行 {self._conversation_turns} 次轮询，"
+                f"上下文 {self._message_manager.get_total_tokens()} tokens，请继续等待。"
+            )
+            
+            logger.info(f"进度汇报: 轮询={self._conversation_turns}, tokens={self._message_manager.get_total_tokens()}")
+            return progress_report
+        
+        return None
+
+    def _detect_repetitive_work(self, tool_name: str, tool_args: dict) -> tuple[bool, str]:
+        """
+        检测重复性工作
+
+        Args:
+            tool_name: 工具名称
+            tool_args: 工具参数
+
+        Returns:
+            (是否重复, 警告消息)
+        """
+        import hashlib
+        
+        # 创建工具调用的唯一标识
+        call_signature = f"{tool_name}:{json.dumps(tool_args, sort_keys=True)}"
+        call_hash = hashlib.md5(call_signature.encode()).hexdigest()
+        
+        # 添加到最近调用记录
+        self._recent_tool_calls.append({
+            "name": tool_name,
+            "args": tool_args,
+            "hash": call_hash,
+            "timestamp": time.time()
+        })
+        
+        # 保持记录大小
+        if len(self._recent_tool_calls) > self._max_recent_calls:
+            self._recent_tool_calls.pop(0)
+        
+        # 检查是否有重复调用
+        recent_hashes = [call["hash"] for call in self._recent_tool_calls]
+        duplicate_count = recent_hashes[1:].count(call_hash)  # 不包括当前调用
+        
+        if duplicate_count >= self._duplicate_threshold:
+            warning_msg = (
+                f"⚠️ 检测到可能的重复性工作：\n"
+                f"  • 工具: {tool_name}\n"
+                f"  • 最近已调用 {duplicate_count} 次\n"
+                f"  • 这可能导致效率低下\n"
+                f"  • 建议：检查工具参数或调整任务策略"
+            )
+            logger.warning(f"重复性工作检测: {tool_name} 已调用 {duplicate_count} 次")
+            return True, warning_msg
+        
+        return False, ""
+
+    def _get_tool_usage_summary(self) -> str:
+        """
+        获取工具使用摘要（用于效率分析）
+
+        Returns:
+            工具使用摘要
+        """
+        if not self._recent_tool_calls:
+            return ""
+        
+        # 统计工具使用频率
+        tool_usage = {}
+        for call in self._recent_tool_calls:
+            name = call["name"]
+            tool_usage[name] = tool_usage.get(name, 0) + 1
+        
+        # 生成摘要
+        summary = "📈 工具使用统计（最近20次调用）：\n"
+        for tool, count in sorted(tool_usage.items(), key=lambda x: x[1], reverse=True):
+            summary += f"  • {tool}: {count} 次\n"
+        
+        return summary
+
     def _get_enhanced_system_prompt(self, user_message: str) -> str:
         """获取增强的系统提示（包含技能内容）"""
         base_prompt = self.config.system_prompt
@@ -396,7 +500,7 @@ class Agent:
             str: Agent 响应
         """
         # 添加用户消息
-        self._messages.append(Message(role="user", content=user_message))
+        self._message_manager.append(Message(role="user", content=user_message))
         logger.debug(f"添加用户消息: {len(user_message)} 字符")
 
         # 检查会话轮询限制
@@ -405,9 +509,19 @@ class Agent:
                 f"⚠️ 会话轮询次数已超过限制（{self.config.max_conversation_turns} 次）。"
                 "为避免无限循环，任务已终止。"
             )
-            self._messages.append(Message(role="assistant", content=response))
+            self._message_manager.append(Message(role="assistant", content=response))
             logger.warning(f"会话轮询次数已超过限制: {self._conversation_turns}")
             return response
+
+        # 检查并汇报进度（每10分钟）
+        progress_report = self._check_and_report_progress()
+        if progress_report:
+            # 在工具调用后的递归调用中汇报进度
+            # 添加进度汇报消息到消息列表
+            self._message_manager.append(Message(role="assistant", content=progress_report))
+            # 保存会话
+            self._save_session()
+            # 注意：不返回，继续正常流程，让用户在下次查询时看到进度
 
         # 检查上下文大小
         total_tokens = sum(len(m.content) for m in self._messages) // 4  # 粗略估计
@@ -425,7 +539,7 @@ class Agent:
             messages = [{"role": "system", "content": enhanced_system_prompt}]
 
             # 添加对话历史（跳过系统消息，避免重复）
-            for m in self._messages:
+            for m in self._message_manager.get_messages():
                 if m.role != "system":
                     messages.append(m.to_api())
 
@@ -449,7 +563,7 @@ class Agent:
             content=assistant_message.content or "",
             tool_calls=assistant_message.tool_calls or [],
         )
-        self._messages.append(msg)
+        self._message_manager.append(msg)
 
         # 处理工具调用
         if assistant_message.tool_calls:
@@ -457,6 +571,19 @@ class Agent:
             logger.info(f"收到 {len(assistant_message.tool_calls)} 个工具调用")
 
             for tool_call in assistant_message.tool_calls:
+                # 获取工具名称和参数
+                tool_name = tool_call.get("function", {}).get("name", "")
+                tool_args = json.loads(tool_call.get("function", {}).get("arguments", "{}"))
+                
+                # 检测重复性工作
+                is_repetitive, warning_msg = self._detect_repetitive_work(tool_name, tool_args)
+                
+                if is_repetitive:
+                    # 添加警告消息
+                    self._messages.append(Message(role="assistant", content=warning_msg))
+                    self._save_session()
+                    logger.warning(f"检测到重复性工作: {tool_name}")
+                
                 # 调用工具
                 result = self._call_tool(tool_call)
 
@@ -465,9 +592,9 @@ class Agent:
                     role="tool",
                     content=result,
                     tool_call_id=tool_call.get("id"),
-                    name=tool_call.get("function", {}).get("name"),
+                    name=tool_name,
                 )
-                self._messages.append(tool_response)
+                self._message_manager.append(tool_response)
 
                 tool_responses.append(result)
 

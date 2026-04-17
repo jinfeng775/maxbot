@@ -55,7 +55,7 @@ session:
   auto_save: true
 
   # 最大会话轮询次数，超过则终止
-  max_conversation_turns: 40
+  max_conversation_turns: 140
 
 # ==================== 技能配置 ====================
 skills:
