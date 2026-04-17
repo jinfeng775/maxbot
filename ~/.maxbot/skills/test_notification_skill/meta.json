@@ -1,0 +1,12 @@
+{
+  "name": "test_notification_skill",
+  "version": 1,
+  "source_file": "examples/test_notification.py",
+  "source_function": "test_function",
+  "created_at": 1776395454.0466993,
+  "confidence": 1.0,
+  "tags": [
+    "test",
+    "notification"
+  ]
+}

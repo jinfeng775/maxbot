@@ -48,6 +48,7 @@ class SkillFactory:
         self,
         capabilities: list[ExtractedCapability],
         overwrite: bool = False,
+        notify: bool = True,
     ) -> list[GeneratedSkill]:
         """
         从能力列表批量生成技能
@@ -55,6 +56,7 @@ class SkillFactory:
         Args:
             capabilities: 提取出的能力列表
             overwrite: 是否覆盖已有技能
+            notify: 是否打印生成通知（默认 True）
 
         Returns:
             生成的技能列表
@@ -66,7 +68,38 @@ class SkillFactory:
             skill = self._generate_single(cap, overwrite)
             if skill:
                 skills.append(skill)
+
+        # 打印生成通知
+        if notify and skills:
+            self._print_generation_notification(skills)
+
         return skills
+
+    def _print_generation_notification(self, skills: list[GeneratedSkill]):
+        """
+        打印技能生成通知
+
+        Args:
+            skills: 生成的技能列表
+        """
+        print("\n" + "=" * 70)
+        print("🔧 代码改动通知：技能生成")
+        print("=" * 70)
+        print(f"\n✅ 成功生成 {len(skills)} 个技能\n")
+        print("⚠️  这是代码改动，不属于记忆规则")
+        print("⚠️  生成的技能文件需要提交到 Git 仓库\n")
+        print("-" * 70)
+        for skill in skills:
+            print(f"\n📦 技能名称: {skill.name}")
+            print(f"   SKILL.md: {skill.skill_md_path}")
+            print(f"   handler.py: {skill.handler_path}")
+            print(f"   版本: {skill.version}")
+        print("\n" + "=" * 70)
+        print("💡 提示：使用以下命令提交改动")
+        print("   git add ~/.maxbot/skills/")
+        print("   git commit -m 'feat: 生成新技能'")
+        print("   git push")
+        print("=" * 70 + "\n")
 
     def _generate_single(
         self,

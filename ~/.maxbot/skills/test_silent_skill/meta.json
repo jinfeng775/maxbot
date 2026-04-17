@@ -1,0 +1,12 @@
+{
+  "name": "test_silent_skill",
+  "version": 1,
+  "source_file": "examples/test_silent.py",
+  "source_function": "silent_function",
+  "created_at": 1776395541.203674,
+  "confidence": 1.0,
+  "tags": [
+    "test",
+    "silent"
+  ]
+}
