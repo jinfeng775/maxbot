@@ -9,7 +9,9 @@ Gateway 多平台网关 — 参考 OpenClaw gateway/ + channels/
 - 认证鉴权
 """
 
-from maxbot.gateway.server import MaxBotGateway, create_gateway, app
+from maxbot.gateway.server import MaxBotGateway, create_gateway
 from maxbot.gateway.auth import AuthManager
+
+app = None
 
 __all__ = ["MaxBotGateway", "create_gateway", "app", "AuthManager"]

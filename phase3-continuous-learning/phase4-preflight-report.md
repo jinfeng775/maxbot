@@ -154,6 +154,7 @@ Phase 4 应承接的是：
    - session store
    - instinct store
    三者职责边界
+4. 边界细化文档：`docs/phase4-memory-boundary.md`
 
 ### P1：建立 Memory System 设计文档
 需要补充：
@@ -171,6 +172,7 @@ Phase 4 应承接的是：
 3. 接入 Agent session / project / user contexts
 4. 检索注入与限额控制
 5. 回归测试
+6. 预留外接本地记忆层（MemPalace）接入位，明确其与 MaxBot 内置 Memory / SessionStore / InstinctStore 的边界
 
 ### P3：单独处理历史 gateway phase4 测试
 建议不要把它混进“记忆持久化阶段”主线。

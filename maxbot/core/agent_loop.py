@@ -187,6 +187,38 @@ _MEMORY_TOOL_SCHEMA = {
                     "description": "分类：memory/user/skill/env（set 时可选，默认 memory）",
                     "default": "memory",
                 },
+                "scope": {
+                    "type": "string",
+                    "description": "记忆范围：session/project/user/global（set/search/list/export 时可选）",
+                    "default": "global",
+                },
+                "source": {
+                    "type": "string",
+                    "description": "来源：manual/agent/imported/derived（set 时可选）",
+                    "default": "manual",
+                },
+                "tags": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "标签列表（set 时可选）",
+                },
+                "importance": {
+                    "type": "number",
+                    "description": "重要度 0.0-1.0（set 时可选）",
+                    "default": 0.5,
+                },
+                "session_id": {
+                    "type": "string",
+                    "description": "会话 ID（set/search/list 时可选）",
+                },
+                "project_id": {
+                    "type": "string",
+                    "description": "项目 ID（set/search/list 时可选）",
+                },
+                "user_id": {
+                    "type": "string",
+                    "description": "用户 ID（set/search/list 时可选）",
+                },
                 "query": {
                     "type": "string",
                     "description": "搜索关键词（search 时必填）",
@@ -213,6 +245,8 @@ class Agent:
         config: AgentConfig | None = None,
         registry: ToolRegistry | None = None,
         session_id: str | None = None,
+        memory: Any | None = None,
+        session_store: Any | None = None,
     ):
         """
         初始化 Agent
@@ -221,8 +255,15 @@ class Agent:
             config: Agent 配置
             registry: 工具注册表（None = 使用全局 registry）
             session_id: 会话 ID（可选）
+            memory: 可选注入的 Memory 实例
+            session_store: 可选注入的 SessionStore 实例
         """
         self.config = config or AgentConfig()
+        if session_store is not None:
+            self.config.session_store = session_store
+        self._injected_memory = memory
+        if self._injected_memory is not None:
+            self.config.memory_enabled = True
         # 如果没有传入 registry，使用全局 registry
         if registry is None:
             from maxbot.tools import registry as global_registry
@@ -288,15 +329,22 @@ class Agent:
 
         logger.info(f"Agent 初始化: 模型={self.config.model}, 会话ID={self.config.session_id}")
 
-        # 初始化 OpenAI 客户端
-        self._client = self._init_client()
-        logger.debug("OpenAI 客户端初始化成功")
+        # 初始化 OpenAI 客户端（延迟初始化，避免非运行路径也强制要求 API Key）
+        self._client: OpenAI | None = None
+        if self.config.api_key or os.environ.get("MAXBOT_API_KEY"):
+            self._client = self._init_client()
+            logger.debug("OpenAI 客户端初始化成功")
+        else:
+            logger.debug("未检测到 API Key，跳过客户端初始化，等待运行时再初始化")
 
         # 初始化 SessionStore
         if self.config.session_store is None:
             self.config.session_store = SessionStore(
                 path=self.config.memory_db_path,
             )
+
+        if self._injected_memory is not None:
+            self.config.session_store.memory = self._injected_memory
 
         # 初始化技能管理器
         self._skill_manager: SkillManager | None = None
@@ -347,18 +395,44 @@ class Agent:
     def _save_session(self):
         """保存会话"""
         if not self.config.session_id or not self.config.auto_save:
-            return
+            return False
 
         logger.debug(f"保存会话: {self.config.session_id}, {self._message_manager.get_message_count()} 条消息")
         # 确保 session 存在
         existing = self.config.session_store.get(self.config.session_id)
         if not existing:
-            self.config.session_store.create(self.config.session_id)
+            self.config.session_store.create(
+                self.config.session_id,
+                title=self._derive_session_title(),
+            )
+            existing = self.config.session_store.get(self.config.session_id)
 
         self.config.session_store.save_messages(
             self.config.session_id,
             [msg.to_api() for msg in self._message_manager.get_messages()],
+            metadata=self._build_session_metadata(existing),
         )
+        return True
+
+    def _derive_session_title(self) -> str:
+        for message in self._message_manager.get_messages():
+            if message.role == "user" and message.content.strip():
+                return message.content.strip()[:80]
+        return ""
+
+    def _build_session_metadata(self, existing_session=None) -> dict[str, Any]:
+        metadata: dict[str, Any] = {}
+        if existing_session and getattr(existing_session, "metadata", None):
+            metadata.update(existing_session.metadata)
+        metadata["conversation_turns"] = self._conversation_turns
+        for message in self._message_manager.get_messages():
+            if not getattr(message, "metadata", None):
+                continue
+            for key in ("project_id", "user_id"):
+                value = message.metadata.get(key)
+                if value and key not in metadata:
+                    metadata[key] = value
+        return metadata
 
     def _call_memory_tool(self, args: dict[str, Any]) -> str:
         """调用内置 memory 工具"""
@@ -370,15 +444,31 @@ class Agent:
                 key=args.get("key"),
                 value=args.get("value"),
                 category=args.get("category", "memory"),
+                scope=args.get("scope", "global"),
+                source=args.get("source", "manual"),
+                tags=args.get("tags") or [],
+                importance=args.get("importance", 0.5),
+                session_id=args.get("session_id"),
+                project_id=args.get("project_id"),
+                user_id=args.get("user_id"),
             )
             return json.dumps({"ok": True}, ensure_ascii=False)
         elif action == "get":
             value = self.config.session_store.memory.get(key=args.get("key"))
             return json.dumps({"key": args.get("key"), "value": value}, ensure_ascii=False)
         elif action == "search":
-            entries = self.config.session_store.memory.search(query=args.get("query"))
+            entries = self.config.session_store.memory.search(
+                query=args.get("query"),
+                scope=args.get("scope"),
+                session_id=args.get("session_id"),
+                project_id=args.get("project_id"),
+                user_id=args.get("user_id"),
+            )
             return json.dumps(
                 [{"key": e.key, "value": e.value, "category": e.category,
+                  "scope": e.scope, "source": e.source, "tags": e.tags,
+                  "importance": e.importance, "session_id": e.session_id,
+                  "project_id": e.project_id, "user_id": e.user_id,
                   "created_at": e.created_at, "updated_at": e.updated_at}
                  for e in entries],
                 ensure_ascii=False,
@@ -387,9 +477,18 @@ class Agent:
             ok = self.config.session_store.memory.delete(key=args.get("key"))
             return json.dumps({"ok": ok}, ensure_ascii=False)
         elif action == "list":
-            entries = self.config.session_store.memory.list_all()
+            entries = self.config.session_store.memory.list_all(
+                category=args.get("category"),
+                scope=args.get("scope"),
+                session_id=args.get("session_id"),
+                project_id=args.get("project_id"),
+                user_id=args.get("user_id"),
+            )
             return json.dumps(
                 [{"key": e.key, "value": e.value, "category": e.category,
+                  "scope": e.scope, "source": e.source, "tags": e.tags,
+                  "importance": e.importance, "session_id": e.session_id,
+                  "project_id": e.project_id, "user_id": e.user_id,
                   "created_at": e.created_at, "updated_at": e.updated_at}
                  for e in entries],
                 ensure_ascii=False,
@@ -518,13 +617,12 @@ class Agent:
 
     def _compress_context(self):
         """压缩上下文（移除旧消息）"""
-        # 简单实现：保留最近的 N 条消息
+        current_messages = self._message_manager.get_messages()
         keep_messages = 10
-        if len(self._messages) > keep_messages:
-            # 保留 system 消息和最近的消息
-            system_msgs = [m for m in self._messages if m.role == "system"]
-            recent_msgs = self._messages[-keep_messages:]
-            self._messages = system_msgs + recent_msgs
+        if len(current_messages) > keep_messages:
+            system_msgs = [m for m in current_messages if m.role == "system"]
+            recent_msgs = current_messages[-keep_messages:]
+            self.messages = system_msgs + recent_msgs
 
     def _check_conversation_limit(self) -> bool:
         """检查是否超过会话轮询限制"""
@@ -631,25 +729,201 @@ class Agent:
         """获取增强的系统提示（包含技能内容）"""
         base_prompt = self.config.system_prompt
 
-        # 如果技能管理器未启用，返回基础提示
-        if not self._skill_manager:
+        if not self._skill_manager and not self.config.memory_enabled:
             return base_prompt
 
         try:
-            # 获取匹配的技能内容
-            skill_content = self._skill_manager.get_injectable_content(
-                user_message,
-                max_chars=self.config.skill_injection_max_chars
-            )
+            sections: list[str] = []
 
-            if skill_content:
-                logger.info(f"注入技能内容: {len(skill_content)} 字符")
-                return f"{base_prompt}\n\n---\n\n相关技能指南:\n\n{skill_content}"
+            if self.config.memory_enabled and self.memory is not None:
+                memory_context = self._build_memory_context()
+                if memory_context:
+                    logger.info(f"注入记忆内容: {len(memory_context)} 字符")
+                    sections.append(f"相关记忆:\n\n{memory_context}")
+
+            if self._skill_manager:
+                # 获取匹配的技能内容
+                skill_content = self._skill_manager.get_injectable_content(
+                    user_message,
+                    max_chars=self.config.skill_injection_max_chars
+                )
+
+                if skill_content:
+                    logger.info(f"注入技能内容: {len(skill_content)} 字符")
+                    sections.append(f"相关技能指南:\n\n{skill_content}")
+
+            if sections:
+                return f"{base_prompt}\n\n---\n\n" + "\n\n---\n\n".join(sections)
 
             return base_prompt
         except Exception as e:
             logger.warning(f"获取技能内容失败: {e}")
             return base_prompt
+
+    def _build_memory_context(self) -> str:
+        if self.memory is None:
+            return ""
+        session_meta = self._build_session_metadata(self.config.session_store.get(self.config.session_id) if self.config.session_id and self.config.session_store else None)
+        session_id = self.config.session_id
+        project_id = session_meta.get("project_id")
+        user_id = session_meta.get("user_id")
+
+        sections: list[str] = []
+        seen_values: set[str] = set()
+        for scope_name, params in [
+            ("session", {"scope": "session", "session_id": session_id}),
+            ("project", {"scope": "project", "project_id": project_id}),
+            ("user", {"scope": "user", "user_id": user_id}),
+            ("global", {"scope": "global"}),
+        ]:
+            text = self.memory.export_text(
+                **params,
+                max_chars=self.config.skill_injection_max_chars,
+                dedupe_by_value=True,
+            )
+            if not text:
+                continue
+
+            kept_lines: list[str] = []
+            for line in text.splitlines()[1:]:
+                if not line.strip():
+                    continue
+                value = line.split(": ", 1)[1] if ": " in line else line
+                if value in seen_values:
+                    continue
+                seen_values.add(value)
+                kept_lines.append(line)
+
+            if not kept_lines:
+                continue
+            sections.append(f"## {scope_name}\n" + "\n".join(kept_lines))
+
+        if not sections:
+            return ""
+
+        combined = "# 持久记忆\n" + "\n".join(sections)
+        max_chars = self.config.skill_injection_max_chars
+        if max_chars and len(combined) > max_chars:
+            combined = combined[:max_chars].rstrip()
+        return combined
+
+    def _extract_memory_fact(self, text: str) -> tuple[str, str, str] | None:
+        stripped = text.strip()
+        if not stripped:
+            return None
+        if stripped.startswith("记住"):
+            fact = stripped[2:].strip("：:，,。 ")
+            if fact:
+                return ("remembered_fact", fact, "user")
+        if stripped.startswith("我叫") and len(stripped) > 2:
+            name = stripped[2:].strip("：:，,。 ")
+            if name:
+                return ("user_name", name, "user")
+        return None
+
+    def _auto_extract_memory(self, user_message: str | None = None, response: str | None = None):
+        if not self.config.memory_enabled or self.memory is None:
+            return
+        message_text = user_message
+        if message_text is None:
+            for message in reversed(self.messages):
+                if message.role == "user" and message.content.strip():
+                    message_text = message.content
+                    break
+        if not message_text:
+            return
+        extracted = self._extract_memory_fact(message_text)
+        if not extracted:
+            return
+        key, value, category = extracted
+        session_meta = self._build_session_metadata(self.config.session_store.get(self.config.session_id) if self.config.session_id and self.config.session_store else None)
+        self.memory.set(
+            key,
+            value,
+            category=category,
+            scope="user",
+            source="derived",
+            user_id=session_meta.get("user_id"),
+            project_id=session_meta.get("project_id"),
+            session_id=self.config.session_id,
+            tags=["auto-extracted"],
+            importance=0.7,
+        )
+
+    def _handle_memory_call(self, args: dict[str, Any]) -> str:
+        raw = self._call_memory_tool(args)
+        try:
+            parsed = json.loads(raw)
+        except Exception:
+            return raw
+
+        action = args.get("action")
+        if action == "set":
+            return json.dumps({"success": parsed.get("ok", False)}, ensure_ascii=False)
+        if action == "search":
+            return json.dumps({"results": parsed}, ensure_ascii=False)
+        if action == "list":
+            return json.dumps({"entries": parsed}, ensure_ascii=False)
+        if action == "delete":
+            return json.dumps({"success": parsed.get("ok", False)}, ensure_ascii=False)
+        return raw
+
+    @property
+    def memory(self):
+        if not self.config.memory_enabled or not self.config.session_store:
+            return None
+        return self.config.session_store.memory
+
+    @property
+    def registry(self):
+        return self._registry
+
+    @property
+    def messages(self):
+        return self._message_manager.get_messages()
+
+    @messages.setter
+    def messages(self, value):
+        self._message_manager.clear()
+        converted = [Message(**msg) if isinstance(msg, dict) else msg for msg in value]
+        self._message_manager.extend(converted)
+        self._messages = converted.copy()
+
+    def save_session(self) -> bool:
+        original_auto_save = self.config.auto_save
+        try:
+            self.config.auto_save = True
+            return bool(self._save_session())
+        finally:
+            self.config.auto_save = original_auto_save
+
+    def list_sessions(self) -> list[dict[str, Any]]:
+        if not self.config.session_store:
+            return []
+        return [
+            {
+                "session_id": session.session_id,
+                "title": session.title,
+                "created_at": session.created_at,
+                "updated_at": session.updated_at,
+            }
+            for session in self.config.session_store.list_sessions()
+        ]
+
+    def delete_session(self, session_id: str) -> bool:
+        if not self.config.session_store:
+            return False
+        return self.config.session_store.delete(session_id)
+
+    def get_stats(self) -> dict[str, Any]:
+        memory_entries = len(self.memory.list_all()) if self.memory is not None else 0
+        return {
+            "memory_enabled": bool(self.memory is not None),
+            "memory_entries": memory_entries,
+            "messages": self._message_manager.get_message_count(),
+            "conversation_turns": self._conversation_turns,
+            "registry_tools": len(self._registry) if self._registry is not None else 0,
+        }
 
     def run(self, user_message: str) -> str:
         """
@@ -695,7 +969,7 @@ class Agent:
                 # 注意：不返回，继续正常流程，让用户在下次查询时看到进度
 
             # 检查上下文大小
-            total_tokens = sum(len(m.content) for m in self._messages) // 4  # 粗略估计
+            total_tokens = sum(len(m.content) for m in self._message_manager.get_messages()) // 4  # 粗略估计
             logger.debug(f"当前上下文大小: {total_tokens} tokens")
             if total_tokens > self.config.max_context_tokens:
                 logger.info("上下文大小超过限制，触发压缩")
@@ -703,6 +977,8 @@ class Agent:
 
             # 调用 LLM
             def api_call():
+                if self._client is None:
+                    self._client = self._init_client()
                 # 获取增强的系统提示
                 enhanced_system_prompt = self._get_enhanced_system_prompt(user_message)
 
@@ -765,7 +1041,7 @@ class Agent:
                     
                     if is_repetitive:
                         # 添加警告消息
-                        self._messages.append(Message(role="assistant", content=warning_msg))
+                        self._message_manager.append(Message(role="assistant", content=warning_msg))
                         self._save_session()
                         logger.warning(f"检测到重复性工作: {tool_name}")
                     
@@ -824,12 +1100,12 @@ class Agent:
 
     def get_messages(self) -> list[Message]:
         """获取消息历史"""
-        return self._messages.copy()
+        return self._message_manager.get_messages()
 
     def reset(self):
         """重置对话"""
         logger.info(f"重置对话: {self.config.session_id}")
-        self._messages = []
+        self.messages = []
         self._conversation_turns = 0
         if self.config.session_id:
             self.config.session_store.delete(self.config.session_id)

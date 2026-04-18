@@ -216,10 +216,66 @@ python3 -m pytest tests/test_phase4_memory_model.py \
 - Memory 有清理、压缩、去重能力
 - 与 Phase 3 instinct 系统边界清晰
 - 有独立的 Phase 4 memory 测试基线
+- 为外接本地记忆（如 MemPalace）预留清晰接入边界与集成计划
 
 ---
 
-## 六、补充说明
+## 六、外接本地记忆规划：MemPalace
+
+### 6.1 为什么考虑 MemPalace
+
+MemPalace 的已知特征：
+- local-first，本地优先
+- verbatim storage，原文保存，不做摘要改写
+- semantic search，支持语义检索
+- pluggable backend，默认 ChromaDB
+- knowledge graph / MCP server / CLI 工具链较完整
+
+这些能力和 MaxBot 第四阶段目标有互补性，尤其适合作为：
+- 外接长期记忆仓
+- 大规模历史会话 / 项目资料归档层
+- 独立于 MaxBot 主循环的本地记忆索引层
+
+### 6.2 集成原则
+
+MemPalace **不应直接替代** MaxBot 当前三层边界：
+- `SessionStore` 仍负责当前会话轨迹
+- `Memory` 仍负责 MaxBot 内部稳定事实层
+- `InstinctStore` 仍负责策略/模式层
+
+更合理的定位是：
+
+**MemPalace = 外接本地长期记忆仓 / 可选增强检索层**
+
+### 6.3 推荐接入方式
+
+建议在 Phase 4 主线完成后，以“可选后端/外接记忆适配器”方式接入：
+
+1. 新增 `MemPalaceAdapter`
+2. 支持把项目资料、对话归档写入 MemPalace
+3. 在 MaxBot 检索阶段增加一层外部召回：
+   - 先查 MaxBot 内置 Memory
+   - 再按需查 MemPalace
+4. 对返回结果做统一注入预算控制
+5. 保持完全本地运行，不引入云依赖
+
+### 6.4 具体实施建议
+
+可新增后续任务：
+- `Task 8: MemPalace adapter 设计与 PoC`
+- `Task 9: MemPalace 检索接入 Agent prompt injection`
+- `Task 10: MemPalace 与内置 Memory 去重/优先级策略`
+
+### 6.5 风险提醒
+
+- 不要把 MemPalace 直接混成 `SessionStore` 的实现细节
+- 不要让 MaxBot 内置 Memory 与 MemPalace 出现双写失控
+- 不要把 instinct/pattern 数据直接塞进 MemPalace 长期仓
+- 接入后必须增加独立集成测试，验证检索优先级、去重和上下文预算
+
+---
+
+## 七、补充说明
 
 建议在正式开工前，把历史 `tests/test_phase4.py` 另行归类为：
 

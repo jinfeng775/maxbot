@@ -7,7 +7,6 @@ import sqlite3
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any
 
 
 @dataclass
@@ -28,7 +27,7 @@ class SessionStore:
             path = Path.home() / ".maxbot" / "sessions.db"
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self._conn = sqlite3.connect(str(self.path))
+        self._conn = sqlite3.connect(str(self.path), check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_db()
 
@@ -49,12 +48,19 @@ class SessionStore:
         """)
         self._conn.commit()
 
-    def create(self, session_id: str, title: str = "") -> Session:
+    def create(self, session_id: str, title: str = "", metadata: dict | None = None) -> Session:
         now = time.time()
-        session = Session(session_id=session_id, title=title, created_at=now, updated_at=now)
+        metadata = metadata or {}
+        session = Session(
+            session_id=session_id,
+            title=title,
+            created_at=now,
+            updated_at=now,
+            metadata=metadata,
+        )
         self._conn.execute(
-            "INSERT INTO sessions (session_id, title, created_at, updated_at) VALUES (?, ?, ?, ?)",
-            (session_id, title, now, now),
+            "INSERT INTO sessions (session_id, title, created_at, updated_at, metadata) VALUES (?, ?, ?, ?, ?)",
+            (session_id, title, now, now, json.dumps(metadata, ensure_ascii=False)),
         )
         self._conn.commit()
         return session
@@ -74,11 +80,25 @@ class SessionStore:
             metadata=json.loads(row["metadata"]),
         )
 
-    def save_messages(self, session_id: str, messages: list[dict]):
+    def save_messages(self, session_id: str, messages: list[dict], metadata: dict | None = None):
+        now = time.time()
+        if metadata is None:
+            self._conn.execute(
+                "UPDATE sessions SET messages = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps(messages, ensure_ascii=False), now, session_id),
+            )
+        else:
+            self._conn.execute(
+                "UPDATE sessions SET messages = ?, metadata = ?, updated_at = ? WHERE session_id = ?",
+                (json.dumps(messages, ensure_ascii=False), json.dumps(metadata, ensure_ascii=False), now, session_id),
+            )
+        self._conn.commit()
+
+    def update_metadata(self, session_id: str, metadata: dict):
         now = time.time()
         self._conn.execute(
-            "UPDATE sessions SET messages = ?, updated_at = ? WHERE session_id = ?",
-            (json.dumps(messages, ensure_ascii=False), now, session_id),
+            "UPDATE sessions SET metadata = ?, updated_at = ? WHERE session_id = ?",
+            (json.dumps(metadata, ensure_ascii=False), now, session_id),
         )
         self._conn.commit()
 
@@ -92,6 +112,7 @@ class SessionStore:
                 title=r["title"],
                 created_at=r["created_at"],
                 updated_at=r["updated_at"],
+                metadata=json.loads(r["metadata"]) if r["metadata"] else {},
             )
             for r in rows
         ]
