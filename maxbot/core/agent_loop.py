@@ -30,6 +30,7 @@ from maxbot.sessions import SessionStore
 from maxbot.config.config_loader import get_config, load_config
 from maxbot.utils.logger import get_logger
 from maxbot.skills import SkillManager
+from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent
 
 # 获取 Agent 日志器
 logger = get_logger("agent")
@@ -265,6 +266,11 @@ class Agent:
         # 兼容性：保留 _messages 属性（内部使用 message_manager）
         self._messages = []  # 不再使用，保留以兼容
 
+        # Hook 系统初始化（参考 ECC hooks.json）
+        self._hook_manager = HookManager()
+        self._hook_manager.register_many(BUILTIN_HOOKS)
+        logger.info(f"Hook 管理器初始化成功: {len(self._hook_manager.list_hooks())} 个钩子")
+
         # 设置会话 ID
         if session_id:
             self.config.session_id = session_id
@@ -382,7 +388,7 @@ class Agent:
             return json.dumps({"error": f"未知操作: {action}"}, ensure_ascii=False)
 
     def _call_tool(self, tool_call: dict[str, Any]) -> str:
-        """调用工具"""
+        """调用工具（集成 Hook 系统）"""
         function_name = tool_call.get("function", {}).get("name")
         arguments = tool_call.get("function", {}).get("arguments", {})
 
@@ -394,16 +400,47 @@ class Agent:
                 logger.warning(f"工具参数 JSON 解析失败: {arguments[:200]}")
                 arguments = {}
 
+        # Pre-tool hook（参考 ECC PreToolUse）
+        try:
+            self._hook_manager.trigger_sync(
+                HookEvent.PRE_TOOL_USE,
+                HookContext(
+                    event=HookEvent.PRE_TOOL_USE,
+                    tool_name=function_name,
+                    tool_args=arguments,
+                    session_id=self.config.session_id
+                )
+            )
+        except Exception as e:
+            logger.error(f"Pre-tool hook 失败: {e}")
+            return json.dumps({"error": f"Pre-tool hook 失败: {str(e)}"}, ensure_ascii=False)
+
         # 内置 memory 工具
         if function_name == "memory":
-            return self._call_memory_tool(arguments)
-
+            result = self._call_memory_tool(arguments)
         # 注册表中的工具
-        if self._registry:
-            return self._registry.call(function_name, arguments)
+        elif self._registry:
+            result = self._registry.call(function_name, arguments)
+        else:
+            logger.error(f"未找到工具: {function_name}")
+            result = json.dumps({"error": f"未找到工具: {function_name}"}, ensure_ascii=False)
 
-        logger.error(f"未找到工具: {function_name}")
-        return json.dumps({"error": f"未找到工具: {function_name}"}, ensure_ascii=False)
+        # Post-tool hook（参考 ECC PostToolUse）
+        try:
+            self._hook_manager.trigger_sync(
+                HookEvent.POST_TOOL_USE,
+                HookContext(
+                    event=HookEvent.POST_TOOL_USE,
+                    tool_name=function_name,
+                    tool_args=arguments,
+                    tool_result=result,
+                    session_id=self.config.session_id
+                )
+            )
+        except Exception as e:
+            logger.error(f"Post-tool hook 失败: {e}")
+
+        return result
 
     def _compress_context(self):
         """压缩上下文（移除旧消息）"""

@@ -97,6 +97,7 @@ def main():
             print("""
   命令列表:
     /help          显示此帮助
+    /new           开启新会话
     /tools         列出所有可用工具
     /reset         重置对话历史
     /stats         显示会话统计
@@ -112,6 +113,11 @@ def main():
                 desc = t.description[:50] + ("..." if len(t.description) > 50 else "")
                 print(f"    • {t.name}: {desc}")
             print()
+            continue
+
+        if user_input == "/new":
+            agent.reset()
+            print("  ✨ 新会话已开启\n")
             continue
 
         if user_input == "/reset":

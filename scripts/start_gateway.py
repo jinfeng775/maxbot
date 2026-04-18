@@ -92,6 +92,22 @@ def main():
                 session_id = f"feishu-{msg.chat_id}"
                 session = server._get_agent(session_id)
 
+                # 检查特殊命令
+                content = msg.content.strip()
+                if content == "/new" or content == "/reset":
+                    # 重置会话
+                    session.reset()
+                    # 从服务器会话列表中删除（如果存在）
+                    if session_id in server._sessions:
+                        del server._sessions[session_id]
+                    await feishu.send_message(OutboundMessage(
+                        chat_id=msg.chat_id,
+                        message_type=MessageType.TEXT,
+                        content="✅ 会话已重置，开始新对话",
+                        reply_to=msg.channel_message_id,
+                    ))
+                    return
+
                 prefix = f"[来自 {msg.sender_name}] " if msg.is_group else ""
                 try:
                     response = session.run(prefix + msg.content)
@@ -146,6 +162,21 @@ def main():
                 """微信消息 → Agent 处理 → 回复"""
                 session_id = f"weixin-{msg.chat_id}"
                 session = server._get_agent(session_id)
+
+                # 检查特殊命令
+                content = msg.content.strip()
+                if content == "/new" or content == "/reset":
+                    # 重置会话
+                    session.reset()
+                    # 从服务器会话列表中删除（如果存在）
+                    if session_id in server._sessions:
+                        del server._sessions[session_id]
+                    await weixin.send_message(OutboundMessage(
+                        chat_id=msg.chat_id,
+                        message_type=MessageType.TEXT,
+                        content="✅ 会话已重置，开始新对话",
+                    ))
+                    return
 
                 prefix = f"[群聊/{msg.sender_name}] " if msg.is_group else ""
                 try:
