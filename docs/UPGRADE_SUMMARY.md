@@ -229,8 +229,8 @@ skills:
 
 # 迭代控制（已更新）
 iteration:
-  # 最大迭代次数（从 50 调整为 90）
-  max_iterations: 90
+  # 最大迭代次数（从 50 调整为 140）
+  max_iterations: 140
 ```
 
 ---

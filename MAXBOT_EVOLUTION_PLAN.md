@@ -95,50 +95,93 @@
 - USER - 用户偏好
 - GLOBAL - 跨项目知识
 
-### 4.2 第四阶段启动条件
+### 4.2 当前阶段状态
 
-- ✅ 第三阶段学习闭环稳定可用
-- ✅ Hook 与主循环已打通
-- ✅ InstinctStore 已具备基本生命周期管理
-- ✅ `Memory` 与 `SessionStore` 已存在可复用基础设施
-- ⚠ 当前历史 `tests/test_phase4.py` 实际是 gateway compatibility 问题，不应与“记忆持久化系统”主线混用
-- ⚠ 进入第四阶段前，建议先按 `phase3-continuous-learning/phase4-preflight-report.md` 明确边界与执行顺序
-- ⚠ 需明确记忆系统与 instinct/store 的职责边界，避免重复存储
+**当前状态：🟡 主线已打通，进入 Step 5（MemPalace 外接记忆 PoC）**
+
+**已完成：**
+- ✅ `Memory` 分层模型、scope/source/tags/importance 元数据
+- ✅ `SessionStore` metadata 持久化
+- ✅ Agent memory retrieval / injection
+- ✅ Memory governance（cleanup / dedup）
+- ✅ Memory / Instinct 边界测试
+- ✅ Phase 4 memory end-to-end baseline
+
+**当前剩余：**
+- [ ] Step 5: MemPalace adapter / PoC
+- [ ] 双层记忆（内置 Memory + 外接 MemPalace）文档收口
+- [ ] 阶段完成口径同步到总计划与进度文档
+
+**详细执行计划：**
+- `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
+- `phase3-continuous-learning/phase4-implementation-plan.md`
 
 ---
 
 ## 🔒 第五阶段：安全和验证系统 (Week 9-10)
 
-### 5.1 安全扫描集成
+### 5.1 当前阶段目标
 
-参考 AgentShield：
-- 1282 个测试用例
-- 98% 覆盖率
-- 102 个静态分析规则
+把现有安全 reviewer / security review system 提升为“可执行工作流 + 质量门”的正式阶段交付。
+
+**当前已有基础：**
+- `maxbot/agents/security_reviewer_agent.py`
+- `maxbot/security/security_review_system.py`
+- `tests/test_phase5_fixes.py`
+
+**当前缺口：**
+- [ ] 统一安全扫描 pipeline
+- [ ] quality gate / severity gate
+- [ ] 结构化 scan report
+- [ ] 端到端测试基线
+
+**详细执行计划：**
+- `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
 
 ---
 
 ## 🤖 第六阶段：多智能体协作 (Week 11-12)
 
-### 6.1 智能体框架设计
+### 6.1 当前阶段目标
 
-**专业智能体：**
-- PlannerAgent - 功能规划
-- ArchitectAgent - 架构设计
-- CodeReviewerAgent - 代码审查
-- SecurityReviewerAgent - 安全审查
+将当前已存在的多 Agent 原型收敛为真实可交付的协调与编排系统。
+
+**当前已有基础：**
+- `maxbot/multi_agent/__init__.py`
+- `maxbot/multi_agent/coordinator.py`
+- `maxbot/multi_agent/worker.py`
+- `maxbot/tools/multi_agent_tools.py`
+- `tests/test_multi_agent.py`
+
+**当前缺口：**
+- [ ] capability-aware worker routing
+- [ ] 依赖调度的严格测试
+- [ ] 汇总结果标准化
+- [ ] 双实现口径收敛
+
+**详细执行计划：**
+- `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
 
 ---
 
 ## ⚡ 第七阶段：钩子系统 (Week 13-14)
 
-### 7.1 钩子架构设计
+### 7.1 当前阶段状态
 
-**事件类型：**
-- session_start - 会话开始
-- pre_tool_use - 工具调用前
-- post_tool_use - 工具调用后
-- error_occurred - 错误发生
+**当前状态：🟡 核心已完成，但需补 compact hooks 与 profile 逻辑后正式验收**
+
+**已完成：**
+- ✅ HookEvent / HookManager / builtin_hooks
+- ✅ 主循环已接入 `SESSION_START / PRE_TOOL_USE / POST_TOOL_USE / SESSION_END / ERROR`
+- ✅ Hook 相关测试基线存在
+
+**当前缺口：**
+- [ ] `PRE_COMPACT` / `POST_COMPACT` 真正接入 `_compress_context()`
+- [ ] `minimal/standard/strict` profile 逻辑落地
+- [ ] profile / compact hooks 验收测试
+
+**详细执行计划：**
+- `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
 
 ---
 

@@ -174,6 +174,8 @@ python3 -m pytest \
 - [x] Memory 与 InstinctStore 边界测试已补齐
 - [x] Phase 4 端到端测试已建立
 - [x] MemPalace 已纳入第四阶段后续集成规划
+- [x] Step 5 详细执行计划已落地（MemPalace / Phase 5 / Phase 6 / Phase 7）
+- [x] MemPalace adapter / PoC 测试基线已建立并通过
 
 ### 当前已通过验证
 
@@ -211,9 +213,9 @@ python3 -m pytest tests/test_phase4.py -q
 
 ### 当前剩余事项
 
-- [ ] 同步总计划文档口径
 - [ ] 执行 git commit / push
-- [ ] 进入后续可选任务：MemPalace adapter 设计与接入
+- [ ] 进入下一阶段：Phase 5 安全与验证系统
+- [ ] 后续可选任务：深化 MemPalace adapter / MCP 接入
 
 ### 关键文档
 

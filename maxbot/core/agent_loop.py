@@ -32,6 +32,7 @@ from maxbot.utils.logger import get_logger
 from maxbot.skills import SkillManager
 from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent
 from maxbot.learning import LearningLoop
+from maxbot.memory import MemPalaceAdapter
 
 # 获取 Agent 日志器
 logger = get_logger("agent")
@@ -70,6 +71,9 @@ class AgentConfig:
     compress_at_tokens: int | None = None
     memory_enabled: bool | None = None
     memory_db_path: str | None = None
+    mempalace_enabled: bool | None = None
+    mempalace_path: str | None = None
+    mempalace_wing: str | None = None
     session_id: str | None = None
     session_store: Any | None = None
     auto_save: bool | None = None
@@ -109,6 +113,9 @@ class AgentConfig:
             ("context", "compress_at_tokens", "compress_at_tokens"),
             ("session", "memory_enabled", "memory_enabled"),
             ("session", "memory_db_path", "memory_db_path"),
+            ("session", "mempalace_enabled", "mempalace_enabled"),
+            ("session", "mempalace_path", "mempalace_path"),
+            ("session", "mempalace_wing", "mempalace_wing"),
             ("session", "session_id", "session_id"),
             ("session", "auto_save", "auto_save"),
             ("session", "max_conversation_turns", "max_conversation_turns"),
@@ -148,6 +155,9 @@ class AgentConfig:
             "max_context_tokens": 128_000,
             "compress_at_tokens": 80_000,
             "memory_enabled": True,
+            "mempalace_enabled": False,
+            "mempalace_path": None,
+            "mempalace_wing": None,
             "auto_save": True,
             "max_conversation_turns": 140,
         }
@@ -761,7 +771,7 @@ class Agent:
             return base_prompt
 
     def _build_memory_context(self) -> str:
-        if self.memory is None:
+        if self.memory is None and not self.config.mempalace_enabled:
             return ""
         session_meta = self._build_session_metadata(self.config.session_store.get(self.config.session_id) if self.config.session_id and self.config.session_store else None)
         session_id = self.config.session_id
@@ -770,33 +780,38 @@ class Agent:
 
         sections: list[str] = []
         seen_values: set[str] = set()
-        for scope_name, params in [
-            ("session", {"scope": "session", "session_id": session_id}),
-            ("project", {"scope": "project", "project_id": project_id}),
-            ("user", {"scope": "user", "user_id": user_id}),
-            ("global", {"scope": "global"}),
-        ]:
-            text = self.memory.export_text(
-                **params,
-                max_chars=self.config.skill_injection_max_chars,
-                dedupe_by_value=True,
-            )
-            if not text:
-                continue
-
-            kept_lines: list[str] = []
-            for line in text.splitlines()[1:]:
-                if not line.strip():
+        if self.memory is not None:
+            for scope_name, params in [
+                ("session", {"scope": "session", "session_id": session_id}),
+                ("project", {"scope": "project", "project_id": project_id}),
+                ("user", {"scope": "user", "user_id": user_id}),
+                ("global", {"scope": "global"}),
+            ]:
+                text = self.memory.export_text(
+                    **params,
+                    max_chars=self.config.skill_injection_max_chars,
+                    dedupe_by_value=True,
+                )
+                if not text:
                     continue
-                value = line.split(": ", 1)[1] if ": " in line else line
-                if value in seen_values:
-                    continue
-                seen_values.add(value)
-                kept_lines.append(line)
 
-            if not kept_lines:
-                continue
-            sections.append(f"## {scope_name}\n" + "\n".join(kept_lines))
+                kept_lines: list[str] = []
+                for line in text.splitlines()[1:]:
+                    if not line.strip():
+                        continue
+                    value = line.split(": ", 1)[1] if ": " in line else line
+                    if value in seen_values:
+                        continue
+                    seen_values.add(value)
+                    kept_lines.append(line)
+
+                if not kept_lines:
+                    continue
+                sections.append(f"## {scope_name}\n" + "\n".join(kept_lines))
+
+        mempalace_text = self._build_mempalace_context(project_id=project_id)
+        if mempalace_text:
+            sections.append(f"## mempalace\n{mempalace_text}")
 
         if not sections:
             return ""
@@ -806,6 +821,43 @@ class Agent:
         if max_chars and len(combined) > max_chars:
             combined = combined[:max_chars].rstrip()
         return combined
+
+    def _build_mempalace_context(self, project_id: str | None = None) -> str:
+        if not self.config.mempalace_enabled:
+            return ""
+
+        adapter = MemPalaceAdapter(self.config.mempalace_path)
+        if not adapter.is_available():
+            return ""
+
+        wing = self.config.mempalace_wing or project_id
+        parts: list[str] = []
+
+        wakeup = adapter.wake_up(wing=wing)
+        if wakeup:
+            parts.append(wakeup)
+
+        query = ""
+        for message in reversed(self.messages):
+            if message.role == "user" and message.content.strip():
+                query = message.content.strip()
+                break
+
+        if query:
+            for entry in adapter.search(query, wing=wing, limit=5):
+                content = entry.get("content", "").strip()
+                if content:
+                    parts.append(content)
+
+        unique_parts: list[str] = []
+        seen = set()
+        for part in parts:
+            if part in seen:
+                continue
+            seen.add(part)
+            unique_parts.append(part)
+
+        return "\n".join(unique_parts)
 
     def _extract_memory_fact(self, text: str) -> tuple[str, str, str] | None:
         stripped = text.strip()

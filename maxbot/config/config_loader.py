@@ -43,7 +43,7 @@ class SystemConfig:
 @dataclass
 class IterationConfig:
     """迭代控制配置"""
-    max_iterations: int = 50
+    max_iterations: int = 140
 
 
 @dataclass
@@ -61,6 +61,9 @@ class SessionConfig:
     session_id: str | None = None
     auto_save: bool = True
     max_conversation_turns: int = 140
+    mempalace_enabled: bool = False
+    mempalace_path: str | None = None
+    mempalace_wing: str | None = None
 
 
 @dataclass
@@ -296,6 +299,9 @@ class ConfigLoader:
             "MAXBOT_MAX_ITERATIONS": ("iteration", "max_iterations"),
             "MAXBOT_MAX_TOKENS": ("context", "max_tokens"),
             "MAXBOT_MEMORY_ENABLED": ("session", "memory_enabled"),
+            "MAXBOT_MEMPALACE_ENABLED": ("session", "mempalace_enabled"),
+            "MAXBOT_MEMPALACE_PATH": ("session", "mempalace_path"),
+            "MAXBOT_MEMPALACE_WING": ("session", "mempalace_wing"),
             "MAXBOT_SESSION_ID": ("session", "session_id"),
             "MAXBOT_MAX_CONVERSATION_TURNS": ("session", "max_conversation_turns"),
             "MAXBOT_SKILLS_DIR": ("skills", "skills_dir"),

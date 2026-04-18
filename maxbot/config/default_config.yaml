@@ -30,7 +30,7 @@ system:
 # ==================== 迭代控制 ====================
 iteration:
   # 最大迭代次数
-  max_iterations: 90
+  max_iterations: 140
 
 # ==================== 上下文管理 ====================
 context:
@@ -54,8 +54,17 @@ session:
   # 每次对话后自动保存
   auto_save: true
 
-  # 最大会话轮询次数，超过则终止
+  # 每次对话后自动保存
   max_conversation_turns: 140
+
+  # 是否启用外接 MemPalace 本地记忆
+  mempalace_enabled: false
+
+  # MemPalace palace 路径（null = 使用默认路径）
+  mempalace_path: null
+
+  # MemPalace wing（null = 自动按项目/上下文决定）
+  mempalace_wing: null
 
 # ==================== 技能配置 ====================
 skills:

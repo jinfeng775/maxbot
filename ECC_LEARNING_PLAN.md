@@ -211,8 +211,8 @@ python3 -m pytest \
 当前结论：
 
 - **Learning / Instinct MVP：已完成**
-- **Memory Persistence：主线已打通，进入实现收尾**
-- **MemPalace：已纳入第四阶段后续适配计划**
+- **Memory Persistence：主线已打通，MemPalace PoC 开始落地**
+- **MemPalace：已纳入第四阶段后续适配计划，且 adapter 测试基线已建立**
 
 ### 当前判断
 
