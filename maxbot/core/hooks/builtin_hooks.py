@@ -68,7 +68,7 @@ def pre_documentation_warning(context: HookContext):
         "PLAN.md",
     ]
     
-    if any(dp) for dp in doc_paths):
+    if any(dp in file_path for dp in doc_paths):
         logger.warning(f"正在编辑文档文件: {file_path}")
 
 
