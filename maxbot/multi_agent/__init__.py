@@ -162,7 +162,7 @@ class AgentDelegate:
                 if self.allowed_tools:
                     child_registry = self._build_filtered_registry()
                 else:
-                    child_registry = self.parent.registry
+                    child_registry = getattr(self.parent, "registry", None) or getattr(self.parent, "_registry", None)
 
                 child_agent = Agent(config=child_config, registry=child_registry)
                 result = child_agent.chat(task)
@@ -200,8 +200,9 @@ class AgentDelegate:
     def _build_filtered_registry(self) -> ToolRegistry:
         """构建只包含允许工具的注册表"""
         filtered = ToolRegistry()
+        parent_registry = getattr(self.parent, "registry", None) or getattr(self.parent, "_registry", None)
         for name in self.allowed_tools:
-            tool = self.parent.registry.get(name)
+            tool = parent_registry.get(name) if parent_registry else None
             if tool:
                 filtered.register_def(tool)
         return filtered

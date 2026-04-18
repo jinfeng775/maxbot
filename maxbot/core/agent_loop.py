@@ -31,6 +31,7 @@ from maxbot.config.config_loader import get_config, load_config
 from maxbot.utils.logger import get_logger
 from maxbot.skills import SkillManager
 from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent
+from maxbot.learning import LearningLoop
 
 # 获取 Agent 日志器
 logger = get_logger("agent")
@@ -271,6 +272,16 @@ class Agent:
         self._hook_manager.register_many(BUILTIN_HOOKS)
         logger.info(f"Hook 管理器初始化成功: {len(self._hook_manager.list_hooks())} 个钩子")
 
+        # 持续学习系统初始化（通过 Hook 接入主循环）
+        self._learning_loop: LearningLoop | None = None
+        try:
+            self._learning_loop = LearningLoop()
+            self._register_learning_hooks()
+            logger.info("持续学习系统初始化成功")
+        except Exception as e:
+            logger.warning(f"持续学习系统初始化失败: {e}")
+            self._learning_loop = None
+
         # 设置会话 ID
         if session_id:
             self.config.session_id = session_id
@@ -387,10 +398,86 @@ class Agent:
             logger.warning(f"未知的 memory 操作: {action}")
             return json.dumps({"error": f"未知操作: {action}"}, ensure_ascii=False)
 
+    def _register_learning_hooks(self):
+        """注册学习系统相关钩子"""
+        if not self._learning_loop:
+            return
+
+        def _on_session_start(context: HookContext):
+            user_message = context.metadata.get("user_message", "")
+            self._learning_loop.on_user_message(
+                session_id=context.session_id or self.config.session_id or "unknown",
+                user_message=user_message,
+                context=context.metadata,
+            )
+
+        def _on_pre_tool_use(context: HookContext):
+            self._learning_loop.on_tool_call(
+                tool_name=context.tool_name or "unknown",
+                arguments=context.tool_args or {},
+                call_id=context.metadata.get("call_id"),
+            )
+
+        def _on_post_tool_use(context: HookContext):
+            tool_result = context.tool_result
+            success = True
+            error = None
+            result_data = None
+
+            if isinstance(tool_result, str):
+                try:
+                    parsed = json.loads(tool_result)
+                    if isinstance(parsed, dict):
+                        result_data = parsed
+                        if parsed.get("error"):
+                            success = False
+                            error = parsed.get("error")
+                except (json.JSONDecodeError, ValueError):
+                    result_data = {"raw": tool_result}
+            elif isinstance(tool_result, dict):
+                result_data = tool_result
+                if tool_result.get("error"):
+                    success = False
+                    error = tool_result.get("error")
+
+            self._learning_loop.on_tool_result(
+                tool_name=context.tool_name or "unknown",
+                success=success,
+                result_data=result_data,
+                error=error,
+                call_id=context.metadata.get("call_id"),
+            )
+
+        def _on_session_end(context: HookContext):
+            self._learning_loop.on_session_end(
+                session_id=context.session_id or self.config.session_id or "unknown"
+            )
+
+        def _on_error(context: HookContext):
+            self._learning_loop.on_error(
+                error=str(context.metadata.get("error", "unknown error")),
+                context=context.metadata,
+            )
+
+        self._hook_manager.register(HookEvent.SESSION_START, _on_session_start)
+        self._hook_manager.register(HookEvent.PRE_TOOL_USE, _on_pre_tool_use)
+        self._hook_manager.register(HookEvent.POST_TOOL_USE, _on_post_tool_use)
+        self._hook_manager.register(HookEvent.SESSION_END, _on_session_end)
+        self._hook_manager.register(HookEvent.ERROR, _on_error)
+
+    def _trigger_hook(self, event: HookEvent, **kwargs):
+        """安全触发 Hook，避免钩子异常破坏主流程"""
+        try:
+            context = HookContext(event=event, session_id=self.config.session_id, **kwargs)
+            self._hook_manager.trigger_sync(event, context)
+        except Exception as e:
+            logger.error(f"Hook 触发失败 [{event}]: {e}")
+
     def _call_tool(self, tool_call: dict[str, Any]) -> str:
         """调用工具（集成 Hook 系统）"""
         function_name = tool_call.get("function", {}).get("name")
         arguments = tool_call.get("function", {}).get("arguments", {})
+        call_id = tool_call.get("id")
 
         # arguments 可能是 JSON 字符串（来自 API），需要解析为 dict
         if isinstance(arguments, str):
@@ -401,19 +488,12 @@ class Agent:
                 arguments = {}
 
         # Pre-tool hook（参考 ECC PreToolUse）
-        try:
-            self._hook_manager.trigger_sync(
-                HookEvent.PRE_TOOL_USE,
-                HookContext(
-                    event=HookEvent.PRE_TOOL_USE,
-                    tool_name=function_name,
-                    tool_args=arguments,
-                    session_id=self.config.session_id
-                )
-            )
-        except Exception as e:
-            logger.error(f"Pre-tool hook 失败: {e}")
-            return json.dumps({"error": f"Pre-tool hook 失败: {str(e)}"}, ensure_ascii=False)
+        self._trigger_hook(
+            HookEvent.PRE_TOOL_USE,
+            tool_name=function_name,
+            tool_args=arguments,
+            metadata={"call_id": call_id},
+        )
 
         # 内置 memory 工具
         if function_name == "memory":
@@ -426,19 +506,13 @@ class Agent:
             result = json.dumps({"error": f"未找到工具: {function_name}"}, ensure_ascii=False)
 
         # Post-tool hook（参考 ECC PostToolUse）
-        try:
-            self._hook_manager.trigger_sync(
-                HookEvent.POST_TOOL_USE,
-                HookContext(
-                    event=HookEvent.POST_TOOL_USE,
-                    tool_name=function_name,
-                    tool_args=arguments,
-                    tool_result=result,
-                    session_id=self.config.session_id
-                )
-            )
-        except Exception as e:
-            logger.error(f"Post-tool hook 失败: {e}")
+        self._trigger_hook(
+            HookEvent.POST_TOOL_USE,
+            tool_name=function_name,
+            tool_args=arguments,
+            tool_result=result,
+            metadata={"call_id": call_id},
+        )
 
         return result
 
@@ -591,130 +665,149 @@ class Agent:
         self._message_manager.append(Message(role="user", content=user_message))
         logger.debug(f"添加用户消息: {len(user_message)} 字符")
 
-        # 检查会话轮询限制
-        if self._check_conversation_limit():
-            response = (
-                f"⚠️ 会话轮询次数已超过限制（{self.config.max_conversation_turns} 次）。"
-                "为避免无限循环，任务已终止。"
-            )
-            self._message_manager.append(Message(role="assistant", content=response))
-            logger.warning(f"会话轮询次数已超过限制: {self._conversation_turns}")
-            return response
-
-        # 检查并汇报进度（每10分钟）
-        progress_report = self._check_and_report_progress()
-        if progress_report:
-            # 在工具调用后的递归调用中汇报进度
-            # 添加进度汇报消息到消息列表
-            self._message_manager.append(Message(role="assistant", content=progress_report))
-            # 保存会话
-            self._save_session()
-            # 注意：不返回，继续正常流程，让用户在下次查询时看到进度
-
-        # 检查上下文大小
-        total_tokens = sum(len(m.content) for m in self._messages) // 4  # 粗略估计
-        logger.debug(f"当前上下文大小: {total_tokens} tokens")
-        if total_tokens > self.config.max_context_tokens:
-            logger.info("上下文大小超过限制，触发压缩")
-            self._compress_context()
-
-        # 调用 LLM
-        def api_call():
-            # 获取增强的系统提示
-            enhanced_system_prompt = self._get_enhanced_system_prompt(user_message)
-
-            # 构建消息列表
-            messages = [{"role": "system", "content": enhanced_system_prompt}]
-
-            # 添加对话历史（跳过系统消息，避免重复）
-            for m in self._message_manager.get_messages():
-                if m.role != "system":
-                    messages.append(m.to_api())
-
-            return self._client.chat.completions.create(
-                model=self.config.model,
-                messages=messages,
-                temperature=self.config.temperature,
-                tools=self._get_tools(),
+        # 会话开始 Hook
+        if user_message:
+            self._trigger_hook(
+                HookEvent.SESSION_START,
+                metadata={"user_message": user_message},
             )
 
-        logger.debug("调用 LLM API")
-        response = _retry_api_call(api_call)
-        logger.debug("LLM API 调用成功")
+        try:
+            # 检查会话轮询限制
+            if self._check_conversation_limit():
+                response = (
+                    f"⚠️ 会话轮询次数已超过限制（{self.config.max_conversation_turns} 次）。"
+                    "为避免无限循环，任务已终止。"
+                )
+                self._message_manager.append(Message(role="assistant", content=response))
+                logger.warning(f"会话轮询次数已超过限制: {self._conversation_turns}")
+                self._trigger_hook(HookEvent.SESSION_END)
+                return response
 
-        # 处理响应
-        assistant_message = response.choices[0].message
+            # 检查并汇报进度（每10分钟）
+            progress_report = self._check_and_report_progress()
+            if progress_report:
+                # 在工具调用后的递归调用中汇报进度
+                # 添加进度汇报消息到消息列表
+                self._message_manager.append(Message(role="assistant", content=progress_report))
+                # 保存会话
+                self._save_session()
+                # 注意：不返回，继续正常流程，让用户在下次查询时看到进度
 
-        # 保存 assistant 消息（将 OpenAI SDK 对象转为 dict 以支持 JSON 序列化）
-        tool_calls_dicts = []
-        for tc in (assistant_message.tool_calls or []):
-            tool_calls_dicts.append({
-                "id": tc.id,
-                "type": tc.type,
-                "function": {
-                    "name": tc.function.name,
-                    "arguments": tc.function.arguments,
-                },
-            })
-        msg = Message(
-            role="assistant",
-            content=assistant_message.content or "",
-            tool_calls=tool_calls_dicts,
-        )
-        self._message_manager.append(msg)
+            # 检查上下文大小
+            total_tokens = sum(len(m.content) for m in self._messages) // 4  # 粗略估计
+            logger.debug(f"当前上下文大小: {total_tokens} tokens")
+            if total_tokens > self.config.max_context_tokens:
+                logger.info("上下文大小超过限制，触发压缩")
+                self._compress_context()
 
-        # 处理工具调用
-        if assistant_message.tool_calls:
-            tool_responses = []
-            logger.info(f"收到 {len(assistant_message.tool_calls)} 个工具调用")
+            # 调用 LLM
+            def api_call():
+                # 获取增强的系统提示
+                enhanced_system_prompt = self._get_enhanced_system_prompt(user_message)
 
-            for tool_call in assistant_message.tool_calls:
-                # 获取工具名称和参数（OpenAI SDK 返回的是对象，不是 dict）
-                tool_name = tool_call.function.name
-                try:
-                    tool_args = json.loads(tool_call.function.arguments)
-                except (json.JSONDecodeError, ValueError) as e:
-                    logger.error(f"工具参数 JSON 解析失败: {tool_name}, 参数: {tool_call.function.arguments[:200]}, 错误: {e}")
-                    tool_args = {}
-                
-                # 检测重复性工作
-                is_repetitive, warning_msg = self._detect_repetitive_work(tool_name, tool_args)
-                
-                if is_repetitive:
-                    # 添加警告消息
-                    self._messages.append(Message(role="assistant", content=warning_msg))
-                    self._save_session()
-                    logger.warning(f"检测到重复性工作: {tool_name}")
-                
-                # 调用工具（传入 dict 格式）
-                result = self._call_tool({
-                    "id": tool_call.id,
+                # 构建消息列表
+                messages = [{"role": "system", "content": enhanced_system_prompt}]
+
+                # 添加对话历史（跳过系统消息，避免重复）
+                for m in self._message_manager.get_messages():
+                    if m.role != "system":
+                        messages.append(m.to_api())
+
+                return self._client.chat.completions.create(
+                    model=self.config.model,
+                    messages=messages,
+                    temperature=self.config.temperature,
+                    tools=self._get_tools(),
+                )
+
+            logger.debug("调用 LLM API")
+            response = _retry_api_call(api_call)
+            logger.debug("LLM API 调用成功")
+
+            # 处理响应
+            assistant_message = response.choices[0].message
+
+            # 保存 assistant 消息（将 OpenAI SDK 对象转为 dict 以支持 JSON 序列化）
+            tool_calls_dicts = []
+            for tc in (assistant_message.tool_calls or []):
+                tool_calls_dicts.append({
+                    "id": tc.id,
+                    "type": tc.type,
                     "function": {
-                        "name": tool_name,
-                        "arguments": tool_call.function.arguments,
+                        "name": tc.function.name,
+                        "arguments": tc.function.arguments,
                     },
                 })
+            msg = Message(
+                role="assistant",
+                content=assistant_message.content or "",
+                tool_calls=tool_calls_dicts,
+            )
+            self._message_manager.append(msg)
 
-                # 保存工具响应
-                tool_response = Message(
-                    role="tool",
-                    content=result,
-                    tool_call_id=tool_call.id,
-                    name=tool_name,
-                )
-                self._message_manager.append(tool_response)
+            # 处理工具调用
+            if assistant_message.tool_calls:
+                tool_responses = []
+                logger.info(f"收到 {len(assistant_message.tool_calls)} 个工具调用")
 
-                tool_responses.append(result)
+                for tool_call in assistant_message.tool_calls:
+                    # 获取工具名称和参数（OpenAI SDK 返回的是对象，不是 dict）
+                    tool_name = tool_call.function.name
+                    try:
+                        tool_args = json.loads(tool_call.function.arguments)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        logger.error(f"工具参数 JSON 解析失败: {tool_name}, 参数: {tool_call.function.arguments[:200]}, 错误: {e}")
+                        tool_args = {}
+                    
+                    # 检测重复性工作
+                    is_repetitive, warning_msg = self._detect_repetitive_work(tool_name, tool_args)
+                    
+                    if is_repetitive:
+                        # 添加警告消息
+                        self._messages.append(Message(role="assistant", content=warning_msg))
+                        self._save_session()
+                        logger.warning(f"检测到重复性工作: {tool_name}")
+                    
+                    # 调用工具（传入 dict 格式）
+                    result = self._call_tool({
+                        "id": tool_call.id,
+                        "function": {
+                            "name": tool_name,
+                            "arguments": tool_call.function.arguments,
+                        },
+                    })
 
-            # 继续对话（让 LLM 处理工具结果）
-            logger.debug("继续对话处理工具结果")
-            return self.run("")  # 递归调用
+                    # 保存工具响应
+                    tool_response = Message(
+                        role="tool",
+                        content=result,
+                        tool_call_id=tool_call.id,
+                        name=tool_name,
+                    )
+                    self._message_manager.append(tool_response)
 
-        # 保存会话
-        self._save_session()
+                    tool_responses.append(result)
 
-        logger.debug(f"对话完成，返回响应: {len(assistant_message.content or '')} 字符")
-        return assistant_message.content or ""
+                # 继续对话（让 LLM 处理工具结果）
+                logger.debug("继续对话处理工具结果")
+                return self.run("")  # 递归调用
+
+            # 保存会话
+            self._save_session()
+            self._trigger_hook(HookEvent.SESSION_END)
+
+            logger.debug(f"对话完成，返回响应: {len(assistant_message.content or '')} 字符")
+            return assistant_message.content or ""
+        except Exception as e:
+            self._trigger_hook(
+                HookEvent.ERROR,
+                metadata={
+                    "error": str(e),
+                    "user_message": user_message,
+                },
+            )
+            raise
 
     def _get_tools(self) -> list[dict]:
         """获取可用工具列表"""

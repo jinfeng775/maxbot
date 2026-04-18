@@ -59,6 +59,30 @@
 4. 存储 - 保存为本能记录
 5. 应用 - 在类似场景中自动应用
 
+### 3.2 当前阶段状态
+
+**当前状态：✅ MVP 完成**
+
+**本阶段已完成：**
+- ✅ Observation → Pattern Extraction → Validation → Persist 主链闭环
+- ✅ 支持三类 pattern：`tool_sequence` / `error_solution` / `user_preference`
+- ✅ 所有 learning entrypoints 统一经过 `PatternValidator`
+- ✅ Error learning 支持分类、验证、复用与低质量拒绝
+- ✅ Instinct matching / auto-apply 支持高/中/低置信度分层
+- ✅ Async worker 支持去重、失败重试、一致性测试
+- ✅ Instinct 生命周期治理：命中统计、成功率、失效、清理、重复合并
+- ✅ 第三阶段架构文档与完成报告已补齐
+
+**验收结果：**
+- Phase 3 相关测试：`39 passed`
+- 详细文档：
+  - `phase3-continuous-learning/phase3-learning-system-architecture.md`
+  - `phase3-continuous-learning/phase3-completion-report.md`
+
+**备注：**
+- 第三阶段已达到可交付 MVP 标准
+- 更强语义匹配、偏好提取增强、可视化治理可作为后续增强项继续推进
+
 ---
 
 ## 💾 第四阶段：记忆持久化系统 (Week 7-8)
@@ -70,6 +94,16 @@
 - PROJECT - 项目特定
 - USER - 用户偏好
 - GLOBAL - 跨项目知识
+
+### 4.2 第四阶段启动条件
+
+- ✅ 第三阶段学习闭环稳定可用
+- ✅ Hook 与主循环已打通
+- ✅ InstinctStore 已具备基本生命周期管理
+- ✅ `Memory` 与 `SessionStore` 已存在可复用基础设施
+- ⚠ 当前历史 `tests/test_phase4.py` 实际是 gateway compatibility 问题，不应与“记忆持久化系统”主线混用
+- ⚠ 进入第四阶段前，建议先按 `phase3-continuous-learning/phase4-preflight-report.md` 明确边界与执行顺序
+- ⚠ 需明确记忆系统与 instinct/store 的职责边界，避免重复存储
 
 ---
 
@@ -182,7 +216,7 @@
 
 ## 📅 时间线总览
 
-```
+```text
 Week 1-2:   架构分析与规划
 Week 3-4:   技能体系建设
 Week 5-6:   持续学习系统
@@ -201,5 +235,6 @@ Week 23-24: 持续改进
 
 **计划状态**: ✅ 第一阶段已完成  
 **计划状态**: ✅ 第二阶段已完成  
-**当前阶段**: 第三阶段 - 持续学习系统  
+**计划状态**: ✅ 第三阶段 MVP 已完成  
+**当前阶段**: 第四阶段前置准备 / 记忆持久化系统  
 **预计完成**: 2025 年 12 月
