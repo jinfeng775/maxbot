@@ -4,6 +4,8 @@
 **执行时间：** 1 天  
 **状态：** ✅ 已完成并提交到 GitHub
 
+> **历史文档说明（2026-04-19 更新）：** 本文档保留 2025-06-17 第一阶段结束时的总结快照；其中能力差距、阶段状态与下一步安排均属于当时语境。当前仓库真实状态请优先参考 `EVOLUTION_PROGRESS.md`、`MAXBOT_EVOLUTION_PLAN.md` 与 `docs/full-evolution-audit-report.md`。
+
 ---
 
 ## 🎉 任务完成
@@ -28,8 +30,8 @@
 | 文件 | 描述 | 大小 |
 |------|------|------|
 | `phase1-architecture-analysis/ecc-architecture-analysis.md` | ECC 架构深度分析 | 7.7 KB |
-| `phase1-architecture-analysis/maxbot-current-assessment.md` | MaxBot 现状评估 | 11.2 KB |
-| `phase1-architecturearchitecture-analysis/maxbot-vs-ecc-comparison.md` | MaxBot vs ECC 对比分析 | 10.8 KB |
+| `phase1-architecture-analysis/maxbot-current-state-assessment.md` | MaxBot 现状评估（fresh audit 补档版） | 3.8 KB |
+| `phase1-architecture-analysis/maxbot-vs-ecc-comparison.md` | MaxBot vs ECC 对比分析 | 10.8 KB |
 | `phase1-architecture-analysis/phase1-completion-report.md` | 第一阶段完成报告 | 9.1 KB |
 
 ---

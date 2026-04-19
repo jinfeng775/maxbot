@@ -25,14 +25,23 @@
 ### 1.1 ECC 架构深度分析
 
 **任务清单：**
-- [ ] 分析 ECC 的目录结构和组件组织
-- [ ] 研究 ECC 的技能系统设计模式
-- [ ] 理解 ECC 的钩子架构和事件系统
+- [x] 分析 ECC 的目录结构和组件组织
+- [x] 研究 ECC 的技能系统设计模式
+- [x] 理解 ECC 的钩子架构和事件系统
 
-**输出产物：**
-- `docs/ecc-architecture-analysis.md` - ECC 架构分析文档
-- `docs/maxbot-vs-ecc-comparison.md` - MaxBot 与 ECC 对比分析
-- `phase1-architecture-report.md` - 第一阶段架构报告
+**当前核验结论：**
+- `phase1-architecture-analysis/ecc-architecture-analysis.md` ✅
+- `phase1-architecture-analysis/maxbot-current-state-assessment.md` ✅（fresh audit 回补版）
+- `phase1-architecture-analysis/maxbot-vs-ecc-comparison.md` ✅
+- `phase1-architecture-analysis/phase1-completion-report.md` ✅
+- Phase 1 历史文档中的 `maxbot-current-state-assessment.md` / `maxbot-current-assessment.md` 漂移已在本轮收口中统一到真实文件路径
+
+**输出产物（按当前仓库真实路径）：**
+- `phase1-architecture-analysis/ecc-architecture-analysis.md`
+- `phase1-architecture-analysis/maxbot-current-state-assessment.md`
+- `phase1-architecture-analysis/maxbot-vs-ecc-comparison.md`
+- `phase1-architecture-analysis/phase1-completion-report.md`
+- `docs/full-evolution-audit-report.md`（fresh audit 补充）
 
 ---
 
@@ -40,11 +49,24 @@
 
 ### 2.1 技能系统架构设计
 
-**核心技能模块：**
+**核心技能模块（当前已落地）：**
 - code-analysis - 代码分析技能
 - tdd-workflow - 测试驱动开发
 - security-review - 安全审查
-- code-generation - 代码生成
+- python-testing - Python 测试工作流
+
+**当前状态：✅ 已完成（默认运行时接入已收口）**
+
+**已完成：**
+- ✅ `SkillManager` / `Skill` 基础能力
+- ✅ 4 个核心技能目录与 `SKILL.md`
+- ✅ Planner / Security Reviewer 预定义 Agent
+- ✅ repo 内置技能与 `~/.maxbot/skills` 用户技能目录双源加载
+- ✅ Agent prompt 技能注入运行时回归测试：`tests/test_phase2_skill_runtime.py`
+
+**验证说明：**
+- `tests/test_phase2.py` = tooling sanity check
+- `tests/test_phase2_skill_runtime.py` = 默认技能目录 / repo 内置技能加载 / prompt 注入专项回归
 
 ---
 
@@ -97,7 +119,7 @@
 
 ### 4.2 当前阶段状态
 
-**当前状态：🟡 主线已打通，进入 Step 5（MemPalace 外接记忆 PoC）**
+**当前状态：✅ 主线已完成，Step 5 MemPalace PoC 已落地，剩余为文档与范围收口**
 
 **已完成：**
 - ✅ `Memory` 分层模型、scope/source/tags/importance 元数据
@@ -106,15 +128,18 @@
 - ✅ Memory governance（cleanup / dedup）
 - ✅ Memory / Instinct 边界测试
 - ✅ Phase 4 memory end-to-end baseline
+- ✅ MemPalace adapter / PoC（`mine` / `search` / `wake-up`）
+- ✅ Phase 4 memory + mempalace 测试基线
 
 **当前剩余：**
-- [ ] Step 5: MemPalace adapter / PoC
 - [ ] 双层记忆（内置 Memory + 外接 MemPalace）文档收口
 - [ ] 阶段完成口径同步到总计划与进度文档
+- [ ] 如后续需要，再扩展更深 MCP / workflow 集成
 
 **详细执行计划：**
 - `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
 - `phase3-continuous-learning/phase4-implementation-plan.md`
+- `docs/full-evolution-audit-report.md`
 
 ---
 
@@ -362,5 +387,6 @@ Week 23-24: 持续改进
 **计划状态**: ✅ 第五阶段已完成  
 **计划状态**: ✅ 第六阶段已完成  
 **计划状态**: ✅ 第七阶段已完成  
-**当前阶段**: 第八阶段准备启动 / 监控和分析系统  
-**预计完成**: 2025 年 12 月
+**当前阶段**: 🟡 第八阶段实施中 / 部署态进化基础设施（Reflection runtime + metrics/trace + promotion policy 第一轮已落地）  
+**当前计划**: `docs/phase8-reflection-memory-plan.md`  
+**并行收口**: Phase 1~7 历史审计文档与仓库卫生问题持续清理

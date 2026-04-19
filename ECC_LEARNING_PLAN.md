@@ -28,15 +28,15 @@
 - **Phase 1 Hook 自动化系统：✅ 已完成**
 - **Phase 2 专用 Agent 体系：🟡 部分完成**
 - **Phase 3 技能模块化：✅ 已完成**
-- **Phase 4 持续学习与记忆：🟡 部分完成**
-- **Phase 5 安全扫描集成：🟡 已有基础，但未达到 ECC 同等规模**
+- **Phase 4 持续学习与记忆：🟡 部分完成（Learning MVP + Memory 主线已完成，Step 5 MemPalace PoC 已覆盖 `mine / search / wake-up`，仍需文档收口）**
+- **Phase 5 安全扫描集成：🟡 主线阶段已完成，但与 ECC 同等规模相比仍属基础版**
 - **Phase 6~8：⏳ 尚未正式展开**
 
 **如果直接回答“MaxBot 目前进度到哪一层了”**：
 
-> **按 ECC 对齐主线看，已经推进到 Phase 4。**
+> **按 ECC 对齐主线看，已经稳定推进到 Phase 4。**
 > 其中 **持续学习闭环（LearningLoop / Instinct）MVP 已完成**，
-> **长期记忆持久化系统进入前置整理与实施规划阶段**。
+> **分层记忆主线也已打通，MemPalace Step 5 PoC（`mine / search / wake-up`）已落地；当前更需要做的是文档收口与后续扩展，而不是再把它说成“尚待实施”。**
 
 ---
 
@@ -46,9 +46,9 @@
 |------|-------------|------------------|------|
 | Phase 1 | Hook 自动化系统 | ✅ 已完成 | `HookManager`、`HookEvent`、`builtin_hooks`、`agent_loop` 已接通 |
 | Phase 2 | 专用 Agent 体系 | 🟡 部分完成 | 已有 `PlannerAgent`、`SecurityReviewerAgent`，但未形成完整 agent family |
-| Phase 3 | 技能模块化 | ✅ 已完成 | 已有 `SkillManager`、SKILL.md 体系、4 个核心技能 |
-| Phase 4 | 持续学习与记忆 | 🟡 部分完成 | `LearningLoop` MVP 已完成；Memory 分层持久化仍待正式实施 |
-| Phase 5 | 安全扫描集成 | 🟡 基础已具备 | 已有 `security-review` 技能与 `SecurityReviewSystem`，但未达到 AgentShield 级规则规模 |
+| Phase 3 | 技能模块化 | ✅ 已完成 | 已有 `SkillManager`、SKILL.md 体系、4 个核心技能；默认运行时也已可加载 repo 内置技能与用户技能 |
+| Phase 4 | 持续学习与记忆 | 🟡 部分完成 | `LearningLoop` MVP 已完成；Memory 主线已打通，MemPalace Step 5 PoC（`mine / search / wake-up`）已落地，但文档仍待收口 |
+| Phase 5 | 安全扫描集成 | 🟡 主线完成但 ECC 对齐仍不足 | 已有 `security-review` 技能、`SecurityReviewSystem` 与安全 pipeline，但未达到 AgentShield 级规则规模 |
 | Phase 6 | 验证循环与质量门 | ⏳ 未开始 | 尚未形成 ECC 风格 grader / pass@k / quality gates |
 | Phase 7 | 多语言审查器 | ⏳ 未开始 | 尚未实现 TypeScript/Python/Go/Rust/Java 专用 reviewer 体系 |
 | Phase 8 | 运算符工作流 | ⏳ 未开始 | 尚未建设 operator-workflows 自动化编排 |
@@ -144,9 +144,10 @@
 
 这部分已经具备**可工作的核心形态**，可以判定为 **✅ 已完成**。
 
-> 备注：当前仓库仍缺“专门针对技能系统的独立回归测试基线”；
-> `tests/test_phase2.py` 当前能通过，但主要覆盖 code editor / analysis tooling，
-> 不能完全等同于技能体系专项验收。
+> 备注：当前仓库已补 `tests/test_phase2_skill_runtime.py`，
+> 默认运行时技能目录、repo 内置技能加载、Agent prompt 注入链路已有专项回归测试；
+> `tests/test_phase2.py` 仍主要覆盖 code editor / analysis tooling，
+> 因此建议继续区分“tooling sanity tests”与“runtime loading/injection tests”。
 
 ---
 
@@ -201,24 +202,25 @@ python3 -m pytest \
 
 ### 记忆系统现状
 
-与“持续学习”相比，“长期记忆持久化”仍处在下一步：
+与“持续学习”相比，“长期记忆持久化”当前已经不是“待实施主线”，而是进入收口阶段：
 
 现有基础设施：
 
 - `maxbot/core/memory.py`
 - `maxbot/sessions/__init__.py`
+- `maxbot/memory/mempalace_adapter.py`
 
 当前结论：
 
 - **Learning / Instinct MVP：已完成**
-- **Memory Persistence：主线已打通，MemPalace PoC 开始落地**
-- **MemPalace：已纳入第四阶段后续适配计划，且 adapter 测试基线已建立**
+- **Memory Persistence：主线已打通并可按完成主线追踪**
+- **MemPalace：Step 5 PoC 已落地（当前已覆盖 `mine / search / wake-up`），但文档仍待收口**
 
 ### 当前判断
 
 因此本阶段应标记为：
 
-> **🟡 部分完成（Learning MVP 已完成，Memory Persistence 主线已打通，进入收尾）**
+> **🟡 部分完成（Learning MVP 已完成，Memory Persistence 主线已完成；当前主要剩余双层记忆边界说明与文档收口，而不是继续把 Step 5 描述成实现缺口）**
 
 ---
 
@@ -311,10 +313,9 @@ python3 -m pytest \
 
 ## 建议的下一步优先级
 
-1. **先完成 Phase 4 的长期记忆持久化主线**
-   - 统一 memory / session / instinct 三者边界
-   - 完成分层记忆模型与检索注入
-   - 建立独立 Phase 4 memory 回归测试基线
+1. **先完成 Phase 4 的双层记忆文档与边界收口**
+   - 统一内置 Memory / SessionStore / Instinct / MemPalace 的边界表述
+   - 保持“主线已完成，外接 PoC 已落地”的稳定口径
 
 2. **补强 Phase 2 / Phase 5 的“体系化程度”**
    - 专用 Agent 从 2 个扩展到 agent family

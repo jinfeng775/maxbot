@@ -5,6 +5,8 @@
 **状态：** ✅ 完成  
 **历时：** 约 2 小时
 
+> **历史文档说明（2026-04-19 更新）：** 本报告保留第一阶段原始完成时的主体内容；其中对 `maxbot-current-state-assessment.md` 的引用代表当时的交付物口径。当前仓库已在 `phase1-architecture-analysis/maxbot-current-state-assessment.md` 以 fresh audit 补档方式回补该交付物，请结合 `EVOLUTION_PROGRESS.md`、`MAXBOT_EVOLUTION_PLAN.md` 与 `docs/full-evolution-audit-report.md` 一并阅读。
+
 ---
 
 ## 阶段目标完成情况
@@ -67,7 +69,7 @@
    - 测试覆盖：6/10
 
 4. **输出产物：** ✅
-   - `maxbot-current-state-assessment.md` (12KB)
+   - `phase1-architecture-analysis/maxbot-current-state-assessment.md`（当前仓库为 fresh audit 回补版，对应原“现状评估”交付物口径）
 
 ---
 
@@ -182,7 +184,7 @@
 | 文档 | 大小 | 状态 |
 |------|------|------|
 | `ecc-architecture-analysis.md` | 12KB | ✅ 完成 |
-| `maxbot-current-state-assessment.md` | 12KB | ✅ 完成 |
+| `phase1-architecture-analysis/maxbot-current-state-assessment.md` | fresh audit 回补版 | ✅ 已回补 |
 | `maxbot-vs-ecc-comparison.md` | 13KB | ✅ 完成 |
 | `phase1-completion-report.md` | 本文档 | ✅ 完成 |
 

@@ -49,35 +49,74 @@ class SkillManager:
     - 预编译正则表达式
     - 延迟加载技能内容
     - 支持增量更新
+    - 默认同时加载用户技能目录与仓库内置核心技能目录
     """
 
     def __init__(self, skills_dir: str | Path | None = None):
-        self.skills_dir = Path(skills_dir) if skills_dir else Path.home() / ".maxbot" / "skills"
+        self.skills_dir = self._resolve_primary_skills_dir(skills_dir)
+        self._load_dirs = self._resolve_load_dirs(skills_dir)
         self._skills: dict[str, Skill] = {}
         self._skills_index: dict[str, list[str]] = {}  # 触发词索引
         self._last_load_time: float = 0
         self._load_skills()
         self._build_index()
 
+    @staticmethod
+    def _builtin_skills_dir() -> Path:
+        return Path(__file__).resolve().parent / "core"
+
+    @staticmethod
+    def _default_user_skills_dir() -> Path:
+        return (Path.home() / ".maxbot" / "skills").expanduser()
+
+    @classmethod
+    def _resolve_primary_skills_dir(cls, skills_dir: str | Path | None) -> Path:
+        if skills_dir is None:
+            return cls._default_user_skills_dir()
+        return Path(skills_dir).expanduser()
+
+    @classmethod
+    def _resolve_load_dirs(cls, skills_dir: str | Path | None) -> list[Path]:
+        builtin = cls._builtin_skills_dir()
+        primary = cls._resolve_primary_skills_dir(skills_dir)
+        default_user = cls._default_user_skills_dir()
+
+        dirs: list[Path] = []
+        if skills_dir is None or primary == default_user:
+            dirs.extend([builtin, primary])
+        else:
+            dirs.append(primary)
+
+        deduped: list[Path] = []
+        seen: set[Path] = set()
+        for directory in dirs:
+            resolved = directory.expanduser()
+            if resolved in seen:
+                continue
+            seen.add(resolved)
+            deduped.append(resolved)
+        return deduped
+
     def _load_skills(self):
         """从目录加载所有技能"""
-        if not self.skills_dir.exists():
-            return
-
-        for skill_dir in self.skills_dir.iterdir():
-            if not skill_dir.is_dir():
+        for base_dir in self._load_dirs:
+            if not base_dir.exists():
                 continue
 
-            skill_md = skill_dir / "SKILL.md"
-            if not skill_md.exists():
-                continue
+            for skill_dir in base_dir.iterdir():
+                if not skill_dir.is_dir():
+                    continue
 
-            try:
-                content = skill_md.read_text(encoding="utf-8")
-                skill = self._parse_skill(skill_dir.name, content, skill_dir)
-                self._skills[skill.name] = skill
-            except Exception as e:
-                print(f"⚠️  加载技能失败: {skill_dir} — {e}")
+                skill_md = skill_dir / "SKILL.md"
+                if not skill_md.exists():
+                    continue
+
+                try:
+                    content = skill_md.read_text(encoding="utf-8")
+                    skill = self._parse_skill(skill_dir.name, content, skill_dir)
+                    self._skills[skill.name] = skill
+                except Exception as e:
+                    print(f"⚠️  加载技能失败: {skill_dir} — {e}")
 
     def _build_index(self):
         """构建触发词索引（用于快速匹配）"""
@@ -103,10 +142,10 @@ class SkillManager:
             if len(parts) >= 3:
                 try:
                     meta = yaml.safe_load(parts[1]) or {}
-                    triggers = meta.get("triggers", [])
-                    tools_needed = meta.get("tools", [])
-                    category = meta.get("category", "general")
                     description = meta.get("description", "")
+                    triggers = meta.get("triggers") or meta.get("keywords") or []
+                    tools_needed = meta.get("tools") or meta.get("tools_required") or []
+                    category = meta.get("category", "general")
                 except Exception:
                     pass
 
@@ -173,13 +212,34 @@ class SkillManager:
 
         parts = []
         total = 0
+        separator = "\n\n---\n\n"
         for skill in matched:
-            if total + len(skill.content) > max_chars:
+            remaining = max_chars - total
+            if remaining <= 0:
                 break
-            parts.append(f"## 技能: {skill.name}\n\n{skill.content}")
-            total += len(skill.content)
 
-        return "\n\n---\n\n".join(parts)
+            prefix = f"## 技能: {skill.name}\n\n"
+            if len(prefix) >= remaining:
+                break
+
+            available_for_content = remaining - len(prefix)
+            skill_body = skill.content
+            if len(skill_body) > available_for_content:
+                skill_body = skill_body[:available_for_content].rstrip()
+                if not skill_body:
+                    break
+
+            segment = f"{prefix}{skill_body}"
+            if parts and len(separator) <= max_chars - total:
+                total += len(separator)
+                parts.append(separator)
+            elif parts:
+                break
+
+            parts.append(segment)
+            total += len(segment)
+
+        return "".join(parts)
 
     def install_skill(self, name: str, content: str) -> Skill:
         """安装新技能"""

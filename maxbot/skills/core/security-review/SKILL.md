@@ -3,6 +3,13 @@ name: security-review
 description: Use this skill when adding authentication, handling user input, working with secrets, creating API endpoints, or implementing payment/sensitive features. Provides comprehensive security checklist and patterns. Adapted from Everything Claude Code for MaxBot.
 category: security
 priority: P0
+triggers:
+  - security
+  - auth
+  - authentication
+  - secret
+  - input validation
+  - api endpoint
 tools_required:
   - terminal
   - file_tools

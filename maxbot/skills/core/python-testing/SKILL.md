@@ -3,6 +3,13 @@ name: python-testing
 description: Python testing strategies using pytest, TDD methodology, fixtures, mocking, parametrization, and coverage requirements. Adapted from Everything Claude Code for MaxBot.
 category: development
 priority: P0
+triggers:
+  - pytest
+  - testing
+  - unit test
+  - integration test
+  - mock
+  - coverage
 tools_required:
   - terminal
   - execute_code

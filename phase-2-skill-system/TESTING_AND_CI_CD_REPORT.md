@@ -4,6 +4,11 @@
 **状态**: ✅ 完成
 **任务**: 测试技能和配置 CI/CD 集成
 
+> **历史文档说明（2026-04-19 更新）：** 本报告属于旧 Phase 2 实验性产物记录，部分技能名称、覆盖率目标与当前主线实现不完全一致。当前主线请优先参考：
+> - `phase2-skills-system/phase2-completion-report.md`
+> - `EVOLUTION_PROGRESS.md`
+> - `docs/full-evolution-audit-report.md`
+
 ---
 
 ## 📋 执行摘要

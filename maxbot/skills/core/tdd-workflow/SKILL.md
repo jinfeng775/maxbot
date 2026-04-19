@@ -3,6 +3,13 @@ name: tdd-workflow
 description: Use this skill when writing new features, fixing bugs, or refactoring code. Enforces test-driven development with 80%+ coverage including unit, integration, and E2E tests. Adapted from Everything Claude Code for MaxBot.
 category: development
 priority: P0
+triggers:
+  - tdd
+  - write tests
+  - tests first
+  - fix bug
+  - bug fix
+  - refactor
 tools_required:
   - terminal
   - file_tools

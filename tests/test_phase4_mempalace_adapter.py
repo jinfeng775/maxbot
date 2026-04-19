@@ -27,6 +27,20 @@ def test_mempalace_adapter_search_parses_cli_output(monkeypatch):
 
 
 
+def test_mempalace_adapter_mine_returns_text(monkeypatch):
+    class Result:
+        returncode = 0
+        stdout = "mined 3 memories"
+        stderr = ""
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/mempalace")
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Result())
+
+    adapter = MemPalaceAdapter(palace_path="/tmp/palace")
+    assert adapter.mine(wing="proj-a", source="notes.md") == "mined 3 memories"
+
+
+
 def test_mempalace_adapter_wakeup_returns_text(monkeypatch):
     class Result:
         returncode = 0
@@ -52,3 +66,17 @@ def test_mempalace_adapter_returns_empty_search_on_failure(monkeypatch):
 
     adapter = MemPalaceAdapter(palace_path="/tmp/palace")
     assert adapter.search("auth") == []
+
+
+
+def test_mempalace_adapter_returns_empty_mine_on_failure(monkeypatch):
+    class Result:
+        returncode = 1
+        stdout = ""
+        stderr = "boom"
+
+    monkeypatch.setattr("shutil.which", lambda name: "/usr/bin/mempalace")
+    monkeypatch.setattr("subprocess.run", lambda *args, **kwargs: Result())
+
+    adapter = MemPalaceAdapter(palace_path="/tmp/palace")
+    assert adapter.mine(wing="proj-a") == ""

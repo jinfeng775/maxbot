@@ -1,6 +1,8 @@
 # MaxBot Phase 4 Step 5 / Phase 5 / Phase 6 / Phase 7 Consolidated Implementation Plan
 
 > **For Hermes:** Use subagent-driven-development skill to implement this plan phase-by-phase, commit after each phase, and sync `MAXBOT_EVOLUTION_PLAN.md` after each phase lands.
+>
+> **历史计划文档说明（2026-04-19 更新）：** 本文档保留的是制定 Phase 4 Step 5 / Phase 5 / Phase 6 / Phase 7 时的执行基线；其中“当前状态/缺口”反映的是计划编写时的仓库状态，不代表当前 live code 现状。当前真实完成度请优先参考 `EVOLUTION_PROGRESS.md`、`MAXBOT_EVOLUTION_PLAN.md` 与 `docs/full-evolution-audit-report.md`。
 
 **Goal:** 在第四阶段主线已打通的基础上，继续完成 Phase 4 的 MemPalace 外接记忆适配 PoC，同时推进 Phase 5（安全与验证系统）、Phase 6（多智能体协作）、Phase 7（Hook 系统补缺与正式验收），并为后续“所有阶段完成后的全仓复审”建立统一执行口径。
 
@@ -99,6 +101,7 @@
 **Step 1: 写测试覆盖最小接口**
 至少覆盖：
 - `MemPalaceAdapter.is_available()`
+- `MemPalaceAdapter.mine(wing=None, source=None)`
 - `MemPalaceAdapter.search(query, wing=None, limit=5)`
 - `MemPalaceAdapter.wake_up(wing=None)`
 - CLI 不存在时的 graceful fallback
@@ -122,9 +125,10 @@ python3 -m pytest tests/test_phase4_mempalace_adapter.py tests/test_phase4_mempa
   - `session.mempalace_path: str | None = None`
   - `session.mempalace_wing: str | None = None`
 - adapter 通过 `subprocess.run()` 调 CLI：
+  - `mempalace mine`
   - `mempalace search`
   - `mempalace wake-up`
-- search 返回结构化结果；wake-up 返回文本
+- `mine` / `wake-up` 返回文本；search 返回结构化结果
 - `agent_loop._build_memory_context()` 在内置 Memory 之后追加 MemPalace 外部上下文（受预算限制）
 
 ### 任务 1.3：补文档与计划同步

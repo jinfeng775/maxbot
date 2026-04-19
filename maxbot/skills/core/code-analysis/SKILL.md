@@ -3,6 +3,13 @@ name: code-analysis
 description: Use this skill when analyzing code structure, identifying patterns, reviewing code quality, or understanding codebases. Integrates with MaxBot's file tools for comprehensive code analysis.
 category: development
 priority: P0
+triggers:
+  - analyze code
+  - code review
+  - code quality
+  - understand codebase
+  - refactor
+  - technical debt
 tools_required:
   - file_tools
   - terminal

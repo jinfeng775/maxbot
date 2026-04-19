@@ -10,13 +10,19 @@
 
 ## 📋 执行摘要
 
+> **历史文档说明（2026-04-19 更新）：** 本报告保留 Phase 2 旧实现产物记录，但其中部分技能清单、文件路径和完成口径已落后于当前主线。当前真实 Phase 2 进度请优先参考：
+> - `phase2-skills-system/phase2-completion-report.md`
+> - `EVOLUTION_PROGRESS.md`
+> - `docs/full-evolution-audit-report.md`
+
 本阶段成功完成了 MaxBot 技能体系的建设，包括技能系统架构、四个核心技能实现、功能验证、测试框架搭建和 CI/CD 配置。这是 MaxBot 进化计划中的一个重要里程碑。
 
 **核心成就**:
 - ✅ 完整的技能系统架构设计
-- ✅ 四个核心技能实现（code-analysis, tdd-workflow, security-review, code-generation）
+- ✅ 四个核心技能实现（code-analysis, tdd-workflow, security-review, python-testing）
 - ✅ 技能管理框架（SkillManager, SkillLoader, SkillRegistry）
-- ✅ 所有技能功能验证通过
+- ✅ 默认运行时技能接入已收口（repo 内置技能 + `~/.maxbot/skills` 用户技能）
+- ✅ 关键技能功能验证通过
 - ✅ 完整的测试框架搭建
 - ✅ CI/CD 配置（GitHub Actions）
 - ✅ 完整的文档体系

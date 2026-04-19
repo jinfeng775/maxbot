@@ -1,8 +1,8 @@
 # MaxBot 进化计划进度追踪
 
 **最后更新：** 2026-04-19  
-**当前阶段：** Phase 1~7 主线已完成，准备进入 Phase 8 监控与分析阶段  
-**整体进度：** 约 58%（7/12 个阶段已完成）
+**当前阶段：** Phase 1~7 主线已完成，Phase 8 第一轮基础设施已落地并进入实施中  
+**整体进度：** 约 60%（7/12 个阶段已完成，Phase 8 约 20%）
 
 ---
 
@@ -16,7 +16,7 @@ Phase 4:  ████████████████████ 100% ✅ 
 Phase 5:  ████████████████████ 100% ✅ 安全扫描主链/质量门/工具入口已收口
 Phase 6:  ████████████████████ 100% ✅ runtime 主链/legacy 兼容层/工具契约已收口
 Phase 7:  ████████████████████ 100% ✅ compact hooks / profile / 阻断路径已收口
-Phase 8:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
+Phase 8:  ████░░░░░░░░░░░░░░░░  20% 🟡 实施中
 Phase 9:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 10: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 11: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
@@ -30,9 +30,9 @@ Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 
 
 ## ✅ 第一阶段：架构分析与规划
 
-**状态：** ✅ 已完成  
+**状态：** ✅ 已完成（历史路径/缺件已在本轮 fresh audit 中回补收口）  
 **完成日期：** 2025-06-17  
-**质量评分：** ⭐⭐⭐⭐⭐ (5/5)
+**质量评分：** ⭐⭐⭐⭐☆ (4/5)
 
 ### 完成任务
 
@@ -44,8 +44,15 @@ Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 
 ### 关键交付物
 
 - `phase1-architecture-analysis/ecc-architecture-analysis.md`
+- `phase1-architecture-analysis/maxbot-current-state-assessment.md`
 - `phase1-architecture-analysis/maxbot-vs-ecc-comparison.md`
 - `phase1-architecture-analysis/phase1-completion-report.md`
+- `docs/full-evolution-audit-report.md`
+
+### fresh audit 处理结果
+
+- `maxbot-current-state-assessment.md` 已按 fresh audit 回补到 `phase1-architecture-analysis/maxbot-current-state-assessment.md`
+- `MAXBOT_EVOLUTION_PLAN.md` 早期版本中的 `docs/...` 路径漂移已在本轮审计收口修正
 
 ### 阶段结论
 
@@ -70,6 +77,8 @@ Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 
   - [x] `python-testing`
   - [x] `code-analysis`
 - [x] Planner / Security Reviewer 两个预定义 Agent 已与技能体系形成联动基础
+- [x] 默认运行时技能加载已补齐：repo 内置核心技能会与 `~/.maxbot/skills` 用户技能目录一同加载
+- [x] Phase 2 运行时技能加载专项回归测试已补齐
 
 ### 关键代码位置
 
@@ -79,17 +88,20 @@ Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 
 - `maxbot/skills/core/security-review/SKILL.md`
 - `maxbot/skills/core/python-testing/SKILL.md`
 - `maxbot/skills/core/code-analysis/SKILL.md`
+- `tests/test_phase2.py`
+- `tests/test_phase2_skill_runtime.py`
 
 ### 关键结论
 
-第二阶段不应再标记为“进行中”，而应正式视为：
+第二阶段当前可以按“基础实现 + 运行时默认接入”口径追踪：
 
-> **✅ 已完成（核心技能体系已建立）**
+> **✅ 已完成（核心技能体系已建立，默认运行时已可同时加载 repo 内置技能与用户技能）**
 
 ### 备注
 
-当前 `tests/test_phase2.py` 更多覆盖代码编辑/分析相关能力，
-后续若要提高阶段可追踪性，建议追加“技能系统专项回归测试”。
+- `tests/test_phase2.py` 仍主要覆盖代码编辑 / 分析工具链，是 sanity check
+- `tests/test_phase2_skill_runtime.py` 则补上了默认技能目录、repo 内置技能加载、Agent prompt 注入三项运行时验收
+- 后续若要继续提高阶段可追踪性，可再追加更完整的 skill-system acceptance suite
 
 ---
 
@@ -157,10 +169,10 @@ python3 -m pytest \
 
 ---
 
-## 🟡 第四阶段：记忆持久化系统
+## 🟢 第四阶段：记忆持久化系统
 
-**状态：** 🟡 主线已打通，进入实现收尾  
-**当前定位：** 边界 / 模型 / 检索 / 注入 / 治理 / 边界测试基线已落地，尚待最终提交与后续外接记忆适配
+**状态：** ✅ 主线完成，Step 5 PoC 已落地，剩余为文档与范围收口  
+**当前定位：** 边界 / 模型 / 检索 / 注入 / 治理 / 边界测试基线已落地；MemPalace `mine / search / wake-up` PoC 已接入，第四阶段主线可按完成追踪
 
 ### 已完成核心能力
 
@@ -213,9 +225,9 @@ python3 -m pytest tests/test_phase4.py -q
 
 ### 当前剩余事项
 
-- [ ] 执行 git commit / push
-- [ ] 进入下一阶段：Phase 5 安全与验证系统
-- [ ] 后续可选任务：深化 MemPalace adapter / MCP 接入
+- [ ] 统一双层记忆（内置 Memory + 外接 MemPalace）阶段口径
+- [ ] 持续收敛相关历史文档中的旧状态描述
+- [ ] 如后续需要，再深化 MemPalace adapter / MCP 集成
 
 ### 关键文档
 
@@ -228,7 +240,7 @@ python3 -m pytest tests/test_phase4.py -q
 
 第四阶段当前最准确的状态是：
 
-> **🟡 主线已打通，测试基线已建立，正在做最后收口与提交**
+> **✅ Phase 4 主线已完成，MemPalace Step 5 PoC（`mine / search / wake-up`）已落地；当前剩余问题主要是文档口径与后续扩展收口，而非主线待实施。**
 
 ---
 
@@ -353,31 +365,33 @@ python3 -m pytest \
   - Phase 5 安全和验证系统
   - Phase 6 多智能体协作
   - Phase 7 钩子系统
-- ⏳ 待开始：5/12
-  - Phase 8 / 9 / 10 / 11 / 12
+- 🟡 实施中：1/12
+  - Phase 8 监控和分析 / 部署态进化基础设施
+- ⏳ 待开始：4/12
+  - Phase 9 / 10 / 11 / 12
 
 ---
 
 ## 🚀 当前最优先下一步
 
-### P0：启动 Phase 8 监控与分析系统
+### P0：继续推进 Phase 8 部署态进化基础设施
 
 1. ✅ Reflection runtime 第一轮已落地（`tests/test_phase8_reflection_loop.py` → `7 passed`）
 2. ✅ runtime metrics / trace 第一轮已落地（`tests/test_phase8_metrics_pipeline.py` → `3 passed`）
 3. ✅ memory / instinct / skill promotion policy 最小闭环已落地（Phase 8 promotion 测试合计 `7 passed`）
 4. 继续以 `docs/phase8-reflection-memory-plan.md` 为执行计划，向 Phase 9 的 grader / quality gate 与后续 harness optimization 打基础
 
-### P1：继续补强 ECC 深水区能力
+### P1：继续收口历史文档与仓库卫生
+
+1. 清理 tracked `.pyc` / `__pycache__` 噪音
+2. 继续压缩 Phase 6 legacy 兼容层暴露面
+3. 继续把历史阶段文档统一到当前主线口径
+
+### P2：继续补强 ECC 深水区能力
 
 1. verification loop / grading framework
 2. multi-language reviewer family
 3. operator-workflows 自动化编排
-
-### P2：全仓复审与阶段后审计准备
-
-1. 从 Phase 1 重新审计实现/测试/文档一致性
-2. 建立 full-evolution audit report
-3. 收敛历史遗留文档口径漂移
 
 ---
 
@@ -398,9 +412,11 @@ python3 -m pytest \
 ### 测试核验
 
 - `python3 -m pytest tests/test_phase2.py -q` → `29 passed`
+- `python3 -m pytest tests/test_phase2_skill_runtime.py -q` → `3 passed`
 - Phase 3 回归测试集 → `39 passed`
 - `python3 -m pytest tests/test_phase5_security_review_system.py tests/test_phase5_security_pipeline.py tests/test_phase5_quality_gate.py tests/test_phase5_security_tool.py -q` → `11 passed`
 - `python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
+- Phase 4~7 宽回归切片 → `135 passed`
 
 ### 相关文档
 
@@ -414,5 +430,5 @@ python3 -m pytest \
 
 **进度更新：** ✅ 已更新  
 **最后更新：** 2026-04-19  
-**当前状态：** ✅ Phase 5 与 Phase 6 已完成，主线已推进到 Phase 8 准备阶段  
-**当前回答：** 我已把 Phase 5 的 fail-closed 安全扫描主链与 Phase 6 的 legacy/runtime/tool 契约收口完成，并同步了主计划与进度文档；Phase 5 已提交，下一步是提交 Phase 6 到 GitHub。
+**当前状态：** ✅ Phase 1~7 主线可按已完成追踪；🟡 Phase 8 第一轮基础设施已落地并进入实施中；历史 Phase 1~7 文档口径已完成第一轮收口  
+**当前回答：** 本轮已完成 fresh audit 文档第一轮收口，并补齐 Phase 1 缺件引用、Phase 2 默认运行时技能接入、Phase 4 MemPalace `mine` 子项与 Phase 7 hook audit 改写；下一步是继续清理 tracked `.pyc` / `__pycache__` 与推进 Phase 8 后续实现。

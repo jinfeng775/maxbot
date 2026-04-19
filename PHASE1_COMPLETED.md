@@ -4,6 +4,8 @@
 **执行者**: MaxBot  
 **阶段**: 第一阶段 - 架构分析与规划 (Week 1-2)
 
+> **历史文档说明（2026-04-19 更新）：** 本文档保留 2025-06-17 第一阶段完成时的历史总结；其中“MaxBot 当前能力差距 / 下一步路线”等段落反映的是当时状态，不代表当前仓库现状。当前请优先参考 `EVOLUTION_PROGRESS.md`、`MAXBOT_EVOLUTION_PLAN.md` 与 `docs/full-evolution-audit-report.md`。
+
 ---
 
 ## ✅ 完成状态
@@ -40,7 +42,7 @@
 
 ### 1. ECC 架构分析报告
 
-**文件**: `phase1-architecture-analysis/ecc-architecturearchitecture-analysis.md`  
+**文件**: `phase1-architecture-analysis/ecc-architecture-analysis.md`  
 **行数**: 555 行  
 **字数**: ~12,000 字
 
@@ -53,7 +55,18 @@
 - ✅ 质量门系统分析
 - ✅ 治理和安全系统分析
 
-### 2. MaxBot vs ECC 对比分析报告
+### 2. MaxBot 当前状态评估（fresh audit 补档版）
+
+**文件**: `phase1-architecture-analysis/maxbot-current-state-assessment.md`  
+**说明**: 本文件为 2026-04-19 fresh audit 回补，用于修复 Phase 1 文档链路中缺失的“现状评估”交付物引用。  
+**字数**: ~3,800 字
+
+**核心内容**:
+- ✅ 当前主线能力盘点（技能 / 学习 / 记忆 / 安全 / 多 Agent / Hook）
+- ✅ 当前优势与不足总结
+- ✅ 可供 Phase 1 文档体系继续引用的统一现状结论
+
+### 3. MaxBot vs ECC 对比分析报告
 
 **文件**: `phase1-architecture-analysis/maxbot-vs-ecc-comparison.md`  
 **行数**: 488 行  
@@ -70,7 +83,7 @@
 - ✅ 改进优先级矩阵 (P0/P1/P2)
 - ✅ 8 阶段实施路线图
 
-### 3. 第一阶段完成报告
+### 4. 第一阶段完成报告
 
 **文件**: `phase1-architecture-analysis/phase1-completion-report.md`  
 **行数**: 494 行  
