@@ -121,7 +121,7 @@ class AgentDelegate:
             child_agent.on_tool_end = self.parent.on_tool_end
 
             # 执行
-            result = child_agent.chat(task)
+            result = child_agent.run(task)
 
             agent_task.result = result
             agent_task.status = AgentStatus.COMPLETED
@@ -169,7 +169,7 @@ class AgentDelegate:
                     child_registry = getattr(self.parent, "registry", None) or getattr(self.parent, "_registry", None)
 
                 child_agent = Agent(config=child_config, registry=child_registry)
-                result = child_agent.chat(task)
+                result = child_agent.run(task)
 
                 agent_task.result = result
                 agent_task.status = AgentStatus.COMPLETED
@@ -364,7 +364,7 @@ class Coordinator:
 
 只返回 JSON，不要其他内容。
 """
-        split_response = self.parent.chat(split_prompt)
+        split_response = self.parent.run(split_prompt)
 
         # 解析子任务
         try:

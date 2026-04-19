@@ -1,95 +1,68 @@
-# Phase 6 Multi-Agent Audit
+# Phase 6 Multi-Agent Completion Audit
 
 ## 结论
 
-Phase 6 当前最大问题不是“完全没实现”，而是**存在两套并行实现且接口已经漂移**。在继续开发前，必须先收敛主实现。
+Phase 6 当前已完成“runtime 主链稳定 + legacy 兼容层显式保留 + 工具层契约统一”的收口工作，可以按**阶段完成**口径追踪。
 
-## 当前发现的核心问题
+## 当前实现状态
 
-### 1. Coordinator 有两套实现
-- `maxbot/multi_agent/__init__.py`
-  - `Coordinator(parent_agent, max_parallel=3)`
-  - 面向 `SubTask`
-  - 最终返回汇总字符串
+### 1. Runtime 主链已稳定
 - `maxbot/multi_agent/coordinator.py`
-  - `Coordinator(max_workers=4)`
-  - 面向 `Task`
-  - 最终返回结构化 dict
+  - capability-aware worker routing
+  - dependency re-scan
+  - failed dependency propagation
+  - aggregated result shape: `status / worker / result / error / description`
+- `maxbot/multi_agent/worker.py`
+  - 统一 `WorkerConfig`
+  - `WorkerAgent.execute_task()` 已进入真实调度主链
+  - `get_status()` / `task_count` / `current_task` 可观察
 
-这不是简单重复，而是**同名双主实现**。
+### 2. Legacy 包级实现已转为兼容层
+- `maxbot/multi_agent/__init__.py`
+  - 包级 `Coordinator` 明确标记为 LegacyCoordinator 路径
+  - 导出 `RuntimeCoordinator` / `RuntimeWorkerConfig`
+  - 保留 `AgentDelegate` / `WorkerPool` / `SubTask` 以兼容 Phase 3 旧能力
 
-### 2. 依赖模型漂移
-- `__init__.py` 使用 `depends_on` + 子任务名
-- `coordinator.py` 使用 `dependencies` + task_id
-- `coordinator.py` 当前是单次扫描 pending 队列，依赖未满足的任务会被跳过，缺少完成后重扫逻辑
+### 3. 子 Agent 执行契约已统一
+- 真实 `Agent` 只提供 `run()`，不提供 `chat()`
+- Legacy 层已切换到 `run()` 主路径
+- `maxbot/tools/multi_agent_tools.py` 增加 `_execute_agent()`：
+  - 优先 `run()`
+  - 回退 `chat()`
+- 因此 runtime tools 与测试 stub 均可兼容
 
-### 3. WorkerConfig 重复定义
-- `coordinator.py`
-- `worker.py`
+### 4. Runtime tools 已收口
+- `spawn_agent`
+- `spawn_agents_parallel`
+- `agent_status`
+- `allowed_tools` 过滤
+- 显式空 allowlist 生成空子注册表
+- spawned task 状态可追踪
 
-两边字段几乎相同，但实际调度器并未统一使用 `WorkerAgent`。
+## 测试基线
 
-### 4. worker.py 与 coordinator.py 脱节
-- `worker.py` 有 `WorkerAgent.execute_task()` / `get_status()`
-- `coordinator.py` 直接调用 `Agent.run()`
-- `current_task/task_count/is_busy` 这套状态没有真正进入调度主链
+### 阶段专项回归
+```bash
+python3 -m pytest \
+  tests/test_phase6_multi_agent_completion.py \
+  tests/test_phase6_coordinator.py \
+  tests/test_phase6_multi_agent_tools.py \
+  tests/test_phase6_multi_agent_compat.py \
+  tests/test_phase3.py \
+  tests/test_multi_agent.py -q
+```
 
-### 5. `chat()` / `run()` 调用漂移
-- `__init__.py` 和 `tools/multi_agent_tools.py` 使用 `child_agent.chat(...)`
-- `coordinator.py` / `worker.py` 使用 `run(...)`
-- 这是当前最危险的运行时兼容风险之一
+结果：
 
-### 6. 工具 schema 与运行时分叉
-- `maxbot/multi_agent/tools.py` 的 schema 声明与 `maxbot/tools/multi_agent_tools.py` 的真实参数/行为不一致
-- 包括：`allowed_tools`、`tasks` 参数形态、`agent_status` 等
+```text
+43 passed
+```
 
-## 最小测试补齐建议
+## 阶段结论
 
-至少先补 4 个测试：
+> **✅ Phase 6 已完成（runtime 主链、legacy 兼容层、工具契约与完成态测试已收口）**
 
-1. **能力路由命中测试**
-   - 有多个 worker 时，按 capability 选对 worker
-
-2. **能力路由未命中测试**
-   - 没有匹配 worker 时返回明确不可路由状态
-
-3. **依赖调度测试**
-   - A 完成后 B 才执行，不能永久 pending
-
-4. **结果聚合测试**
-   - 聚合结果统一包含：
-     - `status`
-     - `result`
-     - `error`
-     - `worker`
-
-建议新增：
-- `tests/test_phase6_multi_agent_orchestration.py`
-- `tests/test_phase6_multi_agent_routing.py`
-
-## 最安全的实现顺序
-
-1. 先确定唯一主实现
-   - 建议以 `coordinator.py` / `worker.py` 为主
-   - `__init__.py` 收敛为兼容层 / 导出层
-
-2. 先补测试，再改调度器
-   - 先锁定 capability / dependency / aggregation 预期
-
-3. 先统一共享类型
-   - 收敛 `WorkerConfig`
-
-4. 再实现 capability-aware `_assign_worker()`
-
-5. 再修依赖调度
-   - pending 队列需要重扫，直到稳定
-
-6. 再统一结果 contract
-
-7. 最后收 `multi_agent_tools.py` 和文档
-
-## 风险点
-- 直接删一套 Coordinator 会破兼容
-- `chat()` / `run()` 不统一会导致隐藏运行时错误
-- schema 与 runtime 不一致会让工具层继续漂移
-- 当前 `tests/test_multi_agent.py` 更像 smoke test，不足以做阶段验收
+## 后续增强项（不影响阶段完成口径）
+- 若未来需要，可继续逐步迁移更多调用方到 `RuntimeCoordinator`
+- 若未来需要，可继续压缩 legacy 层暴露面
+- 更深层多 agent orchestration / planner-driven decomposition 可作为后续增强

@@ -1,8 +1,8 @@
 # MaxBot 进化计划进度追踪
 
 **最后更新：** 2026-04-19  
-**当前阶段：** Phase 5 已完成，Phase 6 第二轮收敛继续推进中  
-**整体进度：** 约 54%（6/12 个阶段已完成，Phase 6 正在收口）
+**当前阶段：** Phase 1~7 主线已完成，准备进入 Phase 8 监控与分析阶段  
+**整体进度：** 约 58%（7/12 个阶段已完成）
 
 ---
 
@@ -14,7 +14,7 @@ Phase 2:  ████████████████████ 100% ✅ 
 Phase 3:  ████████████████████ 100% ✅ MVP 完成
 Phase 4:  ████████████████████ 100% ✅ 主线完成并已提交
 Phase 5:  ████████████████████ 100% ✅ 安全扫描主链/质量门/工具入口已收口
-Phase 6:  ████████████░░░░░░░░  60% 🟡 runtime 主链稳定，legacy/runtime/tool 契约收口中
+Phase 6:  ████████████████████ 100% ✅ runtime 主链/legacy 兼容层/工具契约已收口
 Phase 7:  ████████████████████ 100% ✅ compact hooks / profile / 阻断路径已收口
 Phase 8:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 9:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
@@ -314,10 +314,10 @@ python3 -m pytest \
 ## 🟡 第六 / 第八 / 第九 / 第十 / 第十一 / 第十二阶段
 
 ### 第六阶段：多智能体协作
-- **状态：** 🟡 第二轮收敛继续推进中
-- 现状：runtime 主链已稳定；`coordinator.py` 已真正通过 `WorkerAgent.execute_task()` 接入 `worker.py`；package-level legacy 层已显式标记为兼容层；当前仍在收 legacy / runtime / tools 层子 Agent 执行契约
-- 已新增：`tests/test_phase6_coordinator.py`、`tests/test_phase6_multi_agent_tools.py`、`tests/test_phase6_multi_agent_compat.py`
-- 当前下一步：补上 Phase 6 完成态专项回归测试并切换文档口径为“已完成”
+- **状态：** ✅ 已完成
+- 现状：runtime 主链已稳定；`coordinator.py` 已真正通过 `WorkerAgent.execute_task()` 接入 `worker.py`；package-level legacy 层已显式标记为兼容层；`multi_agent_tools.py` 已统一 run-first 执行契约并兼容 chat fallback
+- 已新增：`tests/test_phase6_coordinator.py`、`tests/test_phase6_multi_agent_tools.py`、`tests/test_phase6_multi_agent_compat.py`、`tests/test_phase6_multi_agent_completion.py`
+- 阶段验证：`python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 
 ### 第八阶段：监控和分析
 - **状态：** ⏳ 待开始
@@ -343,15 +343,14 @@ python3 -m pytest \
 
 ## 📊 阶段完成统计
 
-- ✅ 已完成：6/12
+- ✅ 已完成：7/12
   - Phase 1 架构分析与规划
   - Phase 2 技能体系建设
   - Phase 3 持续学习系统（MVP）
   - Phase 4 记忆持久化系统
   - Phase 5 安全和验证系统
+  - Phase 6 多智能体协作
   - Phase 7 钩子系统
-- 🟡 已进入实现/收口：1/12
-  - Phase 6 多智能体协作（runtime 主链稳定，契约收口中）
 - ⏳ 待开始：5/12
   - Phase 8 / 9 / 10 / 11 / 12
 
@@ -359,24 +358,24 @@ python3 -m pytest \
 
 ## 🚀 当前最优先下一步
 
-### P0：完成 Phase 6 契约收口并提交 GitHub
-
-1. 收 legacy / runtime / tools 层子 Agent 执行契约
-2. 补齐 Phase 6 完成态专项回归测试
-3. 切换 `MAXBOT_EVOLUTION_PLAN.md` / `EVOLUTION_PROGRESS.md` Phase 6 口径为“已完成"
-4. 提交并推送 Phase 6
-
-### P1：启动 Phase 8 监控与分析系统
+### P0：启动 Phase 8 监控与分析系统
 
 1. 建立工具使用 / Agent 调用 / 性能指标采集基线
 2. 设计最小可交付 monitoring report 输出
 3. 补齐 Phase 8 专项计划与测试基线
+4. 保持 `EVOLUTION_PROGRESS.md` / `MAXBOT_EVOLUTION_PLAN.md` / ECC 映射文档口径一致
 
-### P2：继续补强 ECC 深水区能力
+### P1：继续补强 ECC 深水区能力
 
 1. verification loop / grading framework
 2. multi-language reviewer family
 3. operator-workflows 自动化编排
+
+### P2：全仓复审与阶段后审计准备
+
+1. 从 Phase 1 重新审计实现/测试/文档一致性
+2. 建立 full-evolution audit report
+3. 收敛历史遗留文档口径漂移
 
 ---
 
@@ -399,7 +398,7 @@ python3 -m pytest \
 - `python3 -m pytest tests/test_phase2.py -q` → `29 passed`
 - Phase 3 回归测试集 → `39 passed`
 - `python3 -m pytest tests/test_phase5_security_review_system.py tests/test_phase5_security_pipeline.py tests/test_phase5_quality_gate.py tests/test_phase5_security_tool.py -q` → `11 passed`
-- `python3 -m pytest tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `37 passed`
+- `python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 
 ### 相关文档
 
@@ -413,5 +412,5 @@ python3 -m pytest \
 
 **进度更新：** ✅ 已更新  
 **最后更新：** 2026-04-19  
-**当前状态：** ✅ Phase 5 已完成；🟡 Phase 6 已完成 runtime 主链稳定，当前在做最后契约收口  
-**当前回答：** 我已先完成并验证 Phase 5，并开始继续把 Phase 6 收到“可正式标记完成”的最后一步；接下来会先提交 Phase 5，再继续收 Phase 6 并提交 GitHub。
+**当前状态：** ✅ Phase 5 与 Phase 6 已完成，主线已推进到 Phase 8 准备阶段  
+**当前回答：** 我已把 Phase 5 的 fail-closed 安全扫描主链与 Phase 6 的 legacy/runtime/tool 契约收口完成，并同步了主计划与进度文档；Phase 5 已提交，下一步是提交 Phase 6 到 GitHub。

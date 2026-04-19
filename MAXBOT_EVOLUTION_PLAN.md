@@ -173,7 +173,7 @@ python3 -m pytest \
 
 将当前已存在的多 Agent 原型收敛为真实可交付的协调与编排系统。
 
-**当前状态：🟡 第二轮收敛推进中**
+**当前状态：✅ 已完成**
 
 **当前已有基础：**
 - `maxbot/multi_agent/__init__.py`
@@ -184,6 +184,7 @@ python3 -m pytest \
 - `tests/test_phase6_coordinator.py`
 - `tests/test_phase6_multi_agent_tools.py`
 - `tests/test_phase6_multi_agent_compat.py`
+- `tests/test_phase6_multi_agent_completion.py`
 
 **当前已完成：**
 - [x] capability-aware worker routing（`coordinator.py`）
@@ -195,11 +196,26 @@ python3 -m pytest \
 - [x] runtime `agent_status` 已补齐
 - [x] `coordinator.py` 已真正通过 `WorkerAgent.execute_task()` 接入 `worker.py`
 - [x] package-level `LegacyCoordinator` / `RuntimeCoordinator` / `RuntimeWorkerConfig` 导出清晰
+- [x] legacy / runtime / tools 层子 Agent 执行契约已统一为 run-first，并兼容 chat fallback
+- [x] Phase 6 完成态专项回归测试已补齐
 
-**当前剩余缺口：**
-- [ ] legacy / runtime / tools 层子 Agent 执行契约最终收口
-- [ ] Phase 6 完成态专项回归测试
-- [ ] 文档口径切换到“已完成”
+**阶段验证：**
+```bash
+python3 -m pytest \
+  tests/test_phase6_multi_agent_completion.py \
+  tests/test_phase6_coordinator.py \
+  tests/test_phase6_multi_agent_tools.py \
+  tests/test_phase6_multi_agent_compat.py \
+  tests/test_phase3.py \
+  tests/test_multi_agent.py -q
+```
+
+结果：`43 passed`
+
+**后续增强项：**
+- [ ] 逐步迁移更多调用方到 `RuntimeCoordinator`
+- [ ] 进一步压缩 legacy 层暴露面
+- [ ] planner-driven orchestration 可继续增强
 
 **详细执行计划：**
 - `docs/phase6-multi-agent-audit.md`
@@ -329,6 +345,7 @@ Week 23-24: 持续改进
 **计划状态**: ✅ 第三阶段 MVP 已完成  
 **计划状态**: ✅ 第四阶段已完成  
 **计划状态**: ✅ 第五阶段已完成  
+**计划状态**: ✅ 第六阶段已完成  
 **计划状态**: ✅ 第七阶段已完成  
-**当前阶段**: 第六阶段第二轮收敛 / 多智能体协作系统  
+**当前阶段**: 第八阶段准备启动 / 监控和分析系统  
 **预计完成**: 2025 年 12 月

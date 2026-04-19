@@ -23,6 +23,18 @@ _spawned_tasks_lock = threading.Lock()
 _UNSET = object()
 
 
+def _execute_agent(agent: Agent, task: str) -> str:
+    runner = getattr(agent, "run", None)
+    if callable(runner):
+        return runner(task)
+
+    chatter = getattr(agent, "chat", None)
+    if callable(chatter):
+        return chatter(task)
+
+    raise AttributeError("child agent does not expose run() or chat()")
+
+
 def set_parent_agent(agent: Agent):
     """设置父 Agent 引用（Gateway 启动时调用）"""
     _parent_agent_ref[0] = agent
@@ -98,7 +110,7 @@ def spawn_agent(
         )
         child_registry = _build_child_registry(parent, allowed_tools)
         child_agent = Agent(config=child_config, registry=child_registry)
-        result = child_agent.chat(task)
+        result = _execute_agent(child_agent, task)
 
         _record_task(
             task_id,
@@ -168,7 +180,7 @@ def spawn_agents_parallel(tasks: list) -> str:
             )
             child_registry = _build_child_registry(parent, allowed_tools)
             child_agent = Agent(config=child_config, registry=child_registry)
-            result = child_agent.chat(task_def.get("task", ""))
+            result = _execute_agent(child_agent, task_def.get("task", ""))
             payload = {
                 "success": True,
                 "description": description,
