@@ -15,3 +15,8 @@ def test_package_exports_runtime_worker_config():
 def test_package_exports_runtime_coordinator_alias():
     assert hasattr(multi_agent_pkg, "RuntimeCoordinator")
     assert multi_agent_pkg.RuntimeCoordinator is RuntimeCoordinator
+
+
+def test_package_marks_package_level_coordinator_as_legacy():
+    assert hasattr(multi_agent_pkg, "LegacyCoordinator")
+    assert multi_agent_pkg.LegacyCoordinator is multi_agent_pkg.Coordinator

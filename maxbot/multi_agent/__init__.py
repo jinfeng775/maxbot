@@ -23,6 +23,8 @@ from maxbot.core.tool_registry import ToolRegistry
 from maxbot.multi_agent.coordinator import Coordinator as RuntimeCoordinator
 from maxbot.multi_agent.worker import WorkerConfig as RuntimeWorkerConfig
 
+LegacyCoordinator = None  # populated after legacy Coordinator definition
+
 
 # ── 状态枚举 ──────────────────────────────────────────────
 
@@ -226,7 +228,10 @@ class SubTask:
 
 class Coordinator:
     """
-    协调器模式 — 任务拆分 → 并行派发 → 结果合并
+    Legacy 协调器模式 — 任务拆分 → 并行派发 → 结果合并
+
+    兼容保留：运行时执行主链请优先使用 `RuntimeCoordinator`
+    （即 `maxbot.multi_agent.coordinator.Coordinator`）。
 
     参考 CC coordinator/coordinatorMode.ts
 
@@ -487,11 +492,14 @@ class WorkerPool:
         return "\n".join(lines)
 
 
+LegacyCoordinator = Coordinator
+
 __all__ = [
     "AgentDelegate",
     "AgentStatus",
     "AgentTask",
     "Coordinator",
+    "LegacyCoordinator",
     "RuntimeCoordinator",
     "RuntimeWorkerConfig",
     "SubTask",
