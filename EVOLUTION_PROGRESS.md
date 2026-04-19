@@ -1,8 +1,8 @@
 # MaxBot 进化计划进度追踪
 
 **最后更新：** 2026-04-18  
-**当前阶段：** 第四阶段实施中 / 记忆持久化系统主线已打通  
-**整体进度：** 约 44%（4/12 个阶段已完成，Phase 4 已进入实现收尾）
+**当前阶段：** Phase 5 收口中 / 已并行推进 Phase 6 与 Phase 7 第一轮代码增量  
+**整体进度：** 约 49%（4/12 个阶段已完成，Phase 5/6/7 已出现并行实装进展）
 
 ---
 
@@ -12,10 +12,10 @@
 Phase 1:  ████████████████████ 100% ✅ 完成
 Phase 2:  ████████████████████ 100% ✅ 完成
 Phase 3:  ████████████████████ 100% ✅ MVP 完成
-Phase 4:  ████████████░░░░░░░░  60% 🟡 主线已打通，进入收尾
-Phase 5:  ██░░░░░░░░░░░░░░░░░░  10% 🟡 基础已具备
-Phase 6:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
-Phase 7:  ████████████████████ 100% ✅ 完成
+Phase 4:  ████████████████████ 100% ✅ 主线完成并已提交
+Phase 5:  ████████░░░░░░░░░░░░  40% 🟡 第一版已测通，等待提交
+Phase 6:  ██████░░░░░░░░░░░░░░  30% 🟡 协调器第一轮能力路由/依赖调度已落地
+Phase 7:  ████████████████████ 100% ✅ compact hooks / profile / 阻断路径已收口
 Phase 8:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 9:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 10: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
@@ -234,21 +234,24 @@ python3 -m pytest tests/test_phase4.py -q
 
 ## 🟡 第五阶段：安全和验证系统
 
-**状态：** 🟡 基础已具备，但未正式完成
+**状态：** 🟡 基础已具备，第一版 pipeline / quality gate / 工具入口已落地，待文档收口与提交
 
 ### 已有基础
 
 - [x] `security-review` 技能
 - [x] `SecurityReviewerAgent`
 - [x] `maxbot/security/security_review_system.py`
+- [x] `maxbot/security/security_pipeline.py`
+- [x] `maxbot/tools/security_tools.py`
 - [x] bandit / safety / pip-audit 风格工具集成入口
+- [x] quality gate 基线测试
 
 ### 尚未完成
 
 - [ ] 大规模安全规则体系
-- [ ] 安全扫描命令化与门禁化
+- [x] 安全扫描命令化与门禁化（基础版已落地）
 - [ ] 与 verification loop 深度整合
-- [ ] 统一的质量门 / 安全门机制
+- [x] 统一的质量门 / 安全门机制（基础版已落地）
 
 ### 阶段结论
 
@@ -261,7 +264,7 @@ python3 -m pytest tests/test_phase4.py -q
 ## ✅ 第七阶段：钩子系统
 
 **状态：** ✅ 已完成  
-**说明：** 该阶段能力已提前在主线中实现，不必再视为“待开始”
+**说明：** 该阶段能力已提前在主线中实现，且本轮已补齐 compact hooks、runtime profile 与阻断链路
 
 ### 已完成内容
 
@@ -270,6 +273,10 @@ python3 -m pytest tests/test_phase4.py -q
 - [x] 内置 hooks 注册
 - [x] 与 Agent 主循环集成
 - [x] Session / Tool / Error 生命周期触发
+- [x] `_compress_context()` 已触发 `PRE_COMPACT / POST_COMPACT`
+- [x] `minimal / standard / strict` 具备可观察运行时行为
+- [x] strict 下配置保护已通过 `HookAbortError` 真正阻断主流程
+- [x] Phase 7 专项回归测试已补齐
 
 ### 关键代码位置
 
@@ -277,18 +284,24 @@ python3 -m pytest tests/test_phase4.py -q
 - `maxbot/core/hooks/hook_manager.py`
 - `maxbot/core/hooks/builtin_hooks.py`
 - `maxbot/core/agent_loop.py`
+- `tests/test_phase7_hook_profiles.py`
+- `tests/test_hooks.py`
 
 ### 阶段结论
 
-第七阶段已属于**实际落地完成**状态，只是落地顺序早于最初时间表。
+第七阶段当前已不只是“主体存在”，而是：
+
+> **✅ compact hooks / profile / blocking path 已完成第一轮收口，可按已完成口径追踪**
 
 ---
 
-## ⏳ 第六 / 第八 / 第九 / 第十 / 第十一 / 第十二阶段
+## 🟡 第六 / 第八 / 第九 / 第十 / 第十一 / 第十二阶段
 
 ### 第六阶段：多智能体协作
-- **状态：** ⏳ 待开始
-- 现状：已有 2 个专用 Agent，但尚未形成完整多智能体协作框架
+- **状态：** 🟡 第二轮收敛继续推进中
+- 现状：`coordinator.py` 已不仅做 routing/aggregation，还已真正通过 `WorkerAgent.execute_task()` 进入 `worker.py` 主链；`tools/multi_agent_tools.py` 已补 `allowed_tools`、`tasks` 数组输入与 `agent_status`
+- 已新增：`tests/test_phase6_coordinator.py`、`tests/test_phase6_multi_agent_tools.py`
+- 尚未完成：双实现最终统一、`WorkerConfig` 重复定义最终收敛
 
 ### 第八阶段：监控和分析
 - **状态：** ⏳ 待开始
@@ -319,32 +332,36 @@ python3 -m pytest tests/test_phase4.py -q
   - Phase 2 技能体系建设
   - Phase 3 持续学习系统（MVP）
   - Phase 7 钩子系统
-- 🟡 已进入规划/具备基础：2/12
-  - Phase 4 记忆持久化系统
-  - Phase 5 安全和验证系统
-- ⏳ 待开始：6/12
-  - Phase 6 / 8 / 9 / 10 / 11 / 12
+- 🟡 已进入实现/收口：3/12
+  - Phase 4 记忆持久化系统（主线完成并已提交）
+  - Phase 5 安全和验证系统（第一版已测通）
+  - Phase 6 多智能体协作（协调器与 runtime tools 第二轮增量已落地）
+- ⏳ 待开始：5/12
+  - Phase 8 / 9 / 10 / 11 / 12
 
 ---
 
 ## 🚀 当前最优先下一步
 
-### P0：正式进入第四阶段实现
+### P0：提交 Phase 5 / Phase 6 / Phase 7 当前增量
 
-1. 落地四层记忆模型（session / project / user / global）
-2. 接入 Agent / SessionStore 的检索与注入流程
-3. 建立去重、压缩、治理机制
-4. 建立独立 Phase 4 回归测试基线
+1. 提交安全 pipeline / quality gate / security_scan 工具入口
+2. 提交 Phase 6 协调器 + runtime multi-agent tools 第二轮收敛修复
+3. 继续收 Phase 6 双实现统一与 `WorkerConfig` 去重
+4. 保持 `EVOLUTION_PROGRESS.md` / `MAXBOT_EVOLUTION_PLAN.md` / 审计文档口径一致
 
-### P1：清理阶段语义漂移
+### P1：继续收敛 Phase 6 双实现漂移
 
-1. 将历史 `tests/test_phase4.py` 归类为 gateway compatibility cleanup
-2. 在主线文档中继续保持 memory/system 与 gateway/compat 的边界清晰
+1. 统一 `Coordinator` 唯一主实现
+2. 收敛 `WorkerConfig` 重复定义
+3. 让 `worker.py` 正式进入调度主链
+4. 统一 multi-agent tool schema 与 runtime contract
 
-### P2：补强已具备基础但未体系化的阶段
+### P2：补强 Phase 5 深度验证
 
-1. 扩展专用 Agent 生态（Phase 6 前置）
-2. 扩展安全规则体系与质量门（Phase 5 前置）
+1. 增加 verification loop 深整合
+2. 增加更完整的端到端安全扫描回归
+3. 扩展 severity / policy 规则集
 
 ---
 
@@ -366,6 +383,9 @@ python3 -m pytest tests/test_phase4.py -q
 
 - `python3 -m pytest tests/test_phase2.py -q` → `29 passed`
 - Phase 3 回归测试集 → `39 passed`
+- `python3 -m pytest tests/test_phase5_fixes.py tests/test_phase5_security_pipeline.py tests/test_phase5_quality_gate.py tests/test_phase5_security_tool.py tests/test_hooks.py tests/test_phase7_hook_profiles.py tests/test_phase3_agent_loop_hooks.py tests/test_phase6_coordinator.py tests/test_multi_agent.py -q` → `72 passed`
+- `python3 -m pytest tests/test_phase3.py tests/test_phase5_fixes.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_multi_agent.py -q` → `58 passed`
+- `python3 -m pytest tests/test_phase3.py tests/test_phase5_fixes.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_multi_agent.py tests/test_hooks.py tests/test_phase7_hook_profiles.py tests/test_phase3_agent_loop_hooks.py -q` → `87 passed`
 
 ### 相关文档
 
@@ -379,5 +399,5 @@ python3 -m pytest tests/test_phase4.py -q
 
 **进度更新：** ✅ 已更新  
 **最后更新：** 2026-04-18  
-**当前状态：** 🟡 第四阶段主线已打通，正在做最后收口与提交  
-**当前回答：** MaxBot 主线已完成到第三阶段，第四阶段记忆持久化主线已完成边界 / 模型 / 检索 / 注入 / 治理 / 测试基线，当前处于提交前收尾；第七阶段 Hook 系统已提前完成。
+**当前状态：** 🟡 Phase 5 收口中，Phase 6 第二轮收敛仍在持续推进  
+**当前回答：** 刚才我停在“汇报节点”而不是“工程节点”，这是我的问题；现在我已经继续往下做了，最新进展是 `coordinator.py` 已真正改为通过 `WorkerAgent.execute_task()` 进入 `worker.py` 主链，Phase 6 第二轮收敛继续向前推进。

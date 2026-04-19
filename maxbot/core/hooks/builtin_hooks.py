@@ -8,8 +8,13 @@ import re
 import logging
 from typing import Dict, Any
 from .hook_events import HookEvent, HookContext
+from .hook_manager import HookAbortError
 
 logger = logging.getLogger(__name__)
+
+
+def _resolve_profile(context: HookContext) -> str:
+    return context.profile or os.getenv("MAXBOT_HOOK_PROFILE", "standard")
 
 
 # ========== Pre-Tool Hooks ==========
@@ -96,8 +101,8 @@ def pre_config_protection(context: HookContext):
     for config in protected_configs:
         if file_path.endswith(config):
             # 在 strict profile 下拦截
-            if os.getenv("MAXBOT_HOOK_PROFILE") == "strict":
-                raise ValueError(f"禁止编辑配置文件: {file_path}（请修复代码而非放宽配置）")
+            if _resolve_profile(context) == "strict":
+                raise HookAbortError(f"禁止编辑配置文件: {file_path}（请修复代码而非放宽配置）")
             else:
                 logger.warning(f"建议修复代码而非编辑配置文件: {file_path}")
 
@@ -108,11 +113,39 @@ def pre_compact_suggest(context: HookContext):
     
     在逻辑间隔建议手动压缩上下文
     """
+    if context.event == HookEvent.PRE_COMPACT:
+        before_messages = context.metadata.get("before_message_count", 0)
+        before_tokens = context.metadata.get("before_tokens", 0)
+        keep_messages = context.metadata.get("keep_messages")
+        logger.info(
+            "Preparing context compaction: messages=%s, tokens=%s, keep=%s",
+            before_messages,
+            before_tokens,
+            keep_messages,
+        )
+        return
+
     if context.tool_name not in ["edit_file", "code_edit"]:
         return
-    
-    # TODO: 实现上下文大小检查和压缩建议
-    pass
+
+    logger.debug("Compact suggestion hook checked for tool: %s", context.tool_name)
+
+
+# ========== Post-Tool Hooks ==========
+
+def post_compact_summary(context: HookContext):
+    """记录上下文压缩后的摘要信息。"""
+    after_messages = context.metadata.get("after_message_count", 0)
+    after_tokens = context.metadata.get("after_tokens", 0)
+    compressed_messages = context.metadata.get("compressed_messages", 0)
+    compressed_tokens = context.metadata.get("compressed_tokens", 0)
+    logger.info(
+        "Context compacted: after_messages=%s, after_tokens=%s, compressed_messages=%s, compressed_tokens=%s",
+        after_messages,
+        after_tokens,
+        compressed_messages,
+        compressed_tokens,
+    )
 
 
 # ========== Post-Tool Hooks ==========
@@ -184,6 +217,12 @@ BUILTIN_HOOKS = {
     ],
     HookEvent.POST_TOOL_USE: [
         post_tool_observation,
+    ],
+    HookEvent.PRE_COMPACT: [
+        pre_compact_suggest,
+    ],
+    HookEvent.POST_COMPACT: [
+        post_compact_summary,
     ],
     HookEvent.SESSION_START: [
         session_start_capture,

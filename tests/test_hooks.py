@@ -4,12 +4,13 @@ Hook 系统测试
 测试 Hook 事件、管理器和内置钩子
 """
 import pytest
-from maxbot.core.hooks import HookManager, HookEvent, HookContext, BUILTIN_HOOKS
+from maxbot.core.hooks import HookManager, HookEvent, HookContext, BUILTIN_HOOKS, HookAbortError
 from maxbot.core.hooks.builtin_hooks import (
     pre_command_safety_check,
     pre_documentation_warning,
     pre_config_protection,
     pre_compact_suggest,
+    post_compact_summary,
     post_tool_observation,
     session_start_capture,
     session_end_summary,
@@ -81,6 +82,8 @@ class TestHookManager:
         assert HookEvent.POST_TOOL_USE in manager._hooks
         assert HookEvent.SESSION_START in manager._hooks
         assert HookEvent.SESSION_END in manager._hooks
+        assert HookEvent.PRE_COMPACT in manager._hooks
+        assert HookEvent.POST_COMPACT in manager._hooks
         assert HookEvent.ERROR in manager._hooks
     
     def test_hook_disable(self):
@@ -93,7 +96,7 @@ class TestHookManager:
         manager.register(HookEvent.PRE_TOOL_USE, dummy_hook)
         manager.disable(HookEvent.PRE_TOOL_USE)
         
-        assert not manager.is_enabled( HookEvent.PRE_TOOL_USE)
+        assert not manager.is_enabled(HookEvent.PRE_TOOL_USE)
     
     def test_hook_enable(self):
         """测试钩子启用"""
@@ -106,7 +109,7 @@ class TestHookManager:
         manager.disable(HookEvent.PRE_TOOL_USE)
         manager.enable(HookEvent.PRE_TOOL_USE)
         
-        assert manager.is_enabled(  HookEvent.PRE_TOOL_USE)
+        assert manager.is_enabled(HookEvent.PRE_TOOL_USE)
     
     def test_set_profile(self):
         """测试设置 profile"""
@@ -155,6 +158,32 @@ class TestHookManager:
         
         manager.trigger_sync(HookEvent.PRE_TOOL_USE, context)
         assert len(call_count) == 1
+
+    def test_trigger_sync_injects_active_profile_into_context(self):
+        """HookManager 应把当前 profile 注入到上下文里。"""
+        manager = HookManager()
+        manager.set_profile("strict")
+        captured = []
+
+        def capture_profile(context: HookContext):
+            captured.append(context.profile)
+
+        manager.register(HookEvent.PRE_TOOL_USE, capture_profile)
+        manager.trigger_sync(HookEvent.PRE_TOOL_USE, HookContext(event=HookEvent.PRE_TOOL_USE))
+
+        assert captured == ["strict"]
+
+    def test_trigger_sync_reraises_blocking_hook_errors(self):
+        """显式阻断型 Hook 不应被吞掉。"""
+        manager = HookManager()
+
+        def blocking_hook(context: HookContext):
+            raise HookAbortError("blocked")
+
+        manager.register(HookEvent.PRE_TOOL_USE, blocking_hook)
+
+        with pytest.raises(HookAbortError, match="blocked"):
+            manager.trigger_sync(HookEvent.PRE_TOOL_USE, HookContext(event=HookEvent.PRE_TOOL_USE))
     
     def test_trigger_disabled_hook(self):
         """测试触发已禁用的钩子"""
@@ -235,6 +264,39 @@ class TestBuiltinHooks:
         )
         # 在 standard profile 下应该警告
         pre_config_protection(context)
+
+    def test_pre_config_protection_blocks_in_strict_profile(self):
+        """strict profile 下应该阻断受保护配置修改。"""
+        context = HookContext(
+            event=HookEvent.PRE_TOOL_USE,
+            tool_name="write_file",
+            tool_args={"path": ".eslintrc"},
+            profile="strict",
+        )
+
+        with pytest.raises(HookAbortError, match="禁止编辑配置文件"):
+            pre_config_protection(context)
+
+    def test_compact_hooks_accept_compaction_context(self):
+        """compact hooks 应接受 PRE/POST_COMPACT 上下文。"""
+        pre_context = HookContext(
+            event=HookEvent.PRE_COMPACT,
+            metadata={"before_message_count": 12, "before_tokens": 240, "keep_messages": 10},
+        )
+        post_context = HookContext(
+            event=HookEvent.POST_COMPACT,
+            metadata={
+                "before_message_count": 12,
+                "after_message_count": 10,
+                "compressed_messages": 2,
+                "before_tokens": 240,
+                "after_tokens": 200,
+                "compressed_tokens": 40,
+            },
+        )
+
+        pre_compact_suggest(pre_context)
+        post_compact_summary(post_context)
     
     def test_post_tool_observation(self):
         """测试工具调用观察"""

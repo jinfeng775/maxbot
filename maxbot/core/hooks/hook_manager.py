@@ -11,10 +11,14 @@ Hook 管理器
 import os
 import asyncio
 import logging
-from typing import Callable, Dict, List, Optional, Any
+from typing import Callable, Dict, List
 from .hook_events import HookEvent, HookContext
 
 logger = logging.getLogger(__name__)
+
+
+class HookAbortError(Exception):
+    """表示 Hook 显式阻断主流程。"""
 
 
 class HookManager:
@@ -27,10 +31,23 @@ class HookManager:
     4. 运行时配置（set_profile）
     5. 钩子列表（list_hooks）
     """
-    
+
+    _PROFILE_DISABLED_HOOKS = {
+        "minimal": {
+            HookEvent.PRE_TOOL_USE: {"pre_documentation_warning", "pre_compact_suggest"},
+            HookEvent.POST_TOOL_USE: {"post_tool_observation"},
+            HookEvent.PRE_COMPACT: {"pre_compact_suggest"},
+            HookEvent.POST_COMPACT: {"post_compact_summary"},
+        },
+        "standard": {},
+        "strict": {},
+    }
+
     def __init__(self):
         self._hooks: Dict[HookEvent, List[Callable]] = {}
-        self._disabled_hooks: set = set()
+        self._manual_disabled_hooks: set[HookEvent] = set()
+        self._disabled_hooks: set[HookEvent] = set()
+        self._env_disabled_hooks: set[HookEvent] = set()
         self._profile = "standard"  # minimal | standard | strict
         self._load_config_from_env()
     
@@ -38,17 +55,19 @@ class HookManager:
         """从环境变量加载配置（参考 ECC）"""
         # ECC_HOOK_PROFILE: minimal | standard | strict
         profile = os.getenv("MAXBOT_HOOK_PROFILE", "standard")
-        self.set_profile(profile)
-        
+
         # ECC_DISABLED_HOOKS: comma-separated hook names
         disabled = os.getenv("MAXBOT_DISABLED_HOOKS", "")
+        self._env_disabled_hooks.clear()
         if disabled:
             for hook_name in disabled.split(","):
                 try:
                     event = HookEvent(hook_name.strip())
-                    self.disable(event)
+                    self._env_disabled_hooks.add(event)
                 except ValueError:
                     logger.warning(f"Unknown hook event: {hook_name}")
+
+        self.set_profile(profile)
     
     def register(self, event: HookEvent, hook: Callable):
         """注册钩子"""
@@ -69,6 +88,30 @@ class HookManager:
             if hook in self._hooks[event]:
                 self._hooks[event].remove(hook)
                 logger.debug(f"Unregistered hook for {event}: {hook.__name__}")
+
+    def _prepare_context(self, context: HookContext) -> HookContext:
+        context.profile = self._profile
+        return context
+
+    def _get_active_hooks(self, event: HookEvent) -> list[Callable]:
+        disabled_names = self._PROFILE_DISABLED_HOOKS.get(self._profile, {}).get(event, set())
+        return [
+            hook
+            for hook in self._hooks.get(event, [])
+            if hook.__name__ not in disabled_names
+        ]
+
+    def _run_hook(self, hook: Callable, context: HookContext, *, allow_async: bool):
+        if asyncio.iscoroutinefunction(hook):
+            if allow_async:
+                return hook(context)
+            return None
+        return hook(context)
+
+    def _handle_hook_error(self, hook: Callable, error: Exception):
+        if isinstance(error, HookAbortError):
+            raise
+        logger.error(f"Hook {hook.__name__} failed: {error}", exc_info=True)
     
     async def trigger(self, event: HookEvent, context: HookContext):
         """触发钩子（异步，参考 ECC 的 async execution）"""
@@ -76,16 +119,15 @@ class HookManager:
             logger.debug(f"Hook {event} is disabled, skipping")
             return
         
-        hooks = self._hooks.get(event, [])
+        prepared_context = self._prepare_context(context)
+        hooks = self._get_active_hooks(event)
         for hook in hooks:
             try:
-                # 检测是否是 async 函数
-                if asyncio.iscoroutinefunction(hook):
-                    await hook(context)
-                else:
-                    hook(context)
+                result = self._run_hook(hook, prepared_context, allow_async=True)
+                if result is not None and asyncio.iscoroutine(result):
+                    await result
             except Exception as e:
-                logger.error(f"Hook {hook.__name__} failed: {e}", exc_info=True)
+                self._handle_hook_error(hook, e)
     
     def trigger_sync(self, event: HookEvent, context: HookContext):
         """触发钩子（同步，用于非异步上下文）"""
@@ -93,25 +135,30 @@ class HookManager:
             logger.debug(f"Hook {event} is disabled, skipping")
             return
         
-        hooks = self._hooks.get(event, [])
+        prepared_context = self._prepare_context(context)
+        hooks = self._get_active_hooks(event)
         for hook in hooks:
             try:
-                # 同步调用，如果是 async 函数则忽略
-                if not asyncio.iscoroutinefunction(hook):
-                    hook(context)
+                self._run_hook(hook, prepared_context, allow_async=False)
             except Exception as e:
-                logger.error(f"Hook {hook.__name__} failed: {e}", exc_info=True)
+                self._handle_hook_error(hook, e)
     
     def disable(self, event: HookEvent):
         """禁用钩子（参考 ECC_DISABLED_HOOKS）"""
-        self._disabled_hooks.add(event)
+        self._manual_disabled_hooks.add(event)
+        self._apply_profile()
         logger.info(f"Disabled hook: {event}")
     
     def enable(self, event: HookEvent):
         """启用钩子"""
-        if event in self._disabled_hooks:
-            self._disabled_hooks.remove(event)
+        if event in self._manual_disabled_hooks:
+            self._manual_disabled_hooks.remove(event)
+            self._apply_profile()
             logger.info(f"Enabled hook: {event}")
+
+    def _apply_profile(self):
+        self._disabled_hooks = set(self._env_disabled_hooks)
+        self._disabled_hooks.update(self._manual_disabled_hooks)
     
     def set_profile(self, profile: str):
         """设置运行时配置（参考 ECC_HOOK_PROFILE）
@@ -125,25 +172,20 @@ class HookManager:
             profile = "standard"
         
         self._profile = profile
+        self._apply_profile()
         logger.info(f"Set hook profile: {profile}")
-        
-        # 根据 profile 调整钩子行为
-        if profile == "minimal":
-            # minimal profile 只保留安全相关钩子
-            pass  # TODO: 实现 minimal profile 逻辑
-        elif profile == "strict":
-            # strict profile 启用所有检查
-            pass  # TODO: 实现 strict profile 逻辑
     
     def get_profile(self) -> str:
         """获取当前 profile"""
         return self._profile
     
     def list_hooks(self) -> Dict[str, List[str]]:
-        """列出所有已注册的钩子"""
+        """列出所有已注册且当前启用的钩子"""
         result = {}
         for event, hooks in self._hooks.items():
-            result[event.value] = [h.__name__ for h in hooks]
+            if event in self._disabled_hooks:
+                continue
+            result[event.value] = [h.__name__ for h in self._get_active_hooks(event)]
         return result
     
     def is_enabled(self, event: HookEvent) -> bool:

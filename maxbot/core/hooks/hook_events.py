@@ -40,6 +40,7 @@ class HookContext:
     tool_args: Optional[Dict[str, Any]] = None
     tool_result: Optional[Any] = None
     session_id: Optional[str] = None
+    profile: Optional[str] = None
     metadata: Optional[Dict[str, Any]] = field(default_factory=dict)
     
     def __post_init__(self):

@@ -24,12 +24,13 @@ await hook_manager.trigger(
 ```
 """
 from .hook_events import HookEvent, HookContext
-from .hook_manager import HookManager
+from .hook_manager import HookManager, HookAbortError
 from .builtin_hooks import BUILTIN_HOOKS
 
 __all__ = [
     "HookEvent",
     "HookContext", 
     "HookManager",
+    "HookAbortError",
     "BUILTIN_HOOKS",
 ]

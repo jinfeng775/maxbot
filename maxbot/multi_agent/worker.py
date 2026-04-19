@@ -73,6 +73,9 @@ class WorkerAgent:
                 "success": True,
                 "result": result,
                 "task_count": self.task_count,
+                "worker": self.config.name,
+                "current_task": self.current_task,
+                "is_busy": False,
             }
 
         except Exception as e:
@@ -82,7 +85,12 @@ class WorkerAgent:
                 "success": False,
                 "error": str(e),
                 "task_count": self.task_count,
+                "worker": self.config.name,
+                "current_task": self.current_task,
+                "is_busy": False,
             }
+        finally:
+            self.current_task = None
 
     def get_status(self) -> dict[str, Any]:
         """

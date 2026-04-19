@@ -127,12 +127,17 @@
 **当前已有基础：**
 - `maxbot/agents/security_reviewer_agent.py`
 - `maxbot/security/security_review_system.py`
+- `maxbot/security/security_pipeline.py`
+- `maxbot/tools/security_tools.py`
 - `tests/test_phase5_fixes.py`
+- `tests/test_phase5_security_pipeline.py`
+- `tests/test_phase5_quality_gate.py`
+- `tests/test_phase5_security_tool.py`
 
 **当前缺口：**
-- [ ] 统一安全扫描 pipeline
-- [ ] quality gate / severity gate
-- [ ] 结构化 scan report
+- [ ] 统一安全扫描 pipeline（基础版已落地，待增强）
+- [x] quality gate / severity gate（基础版已落地）
+- [x] 结构化 scan report（基础版已落地）
 - [ ] 端到端测试基线
 
 **详细执行计划：**
@@ -152,15 +157,27 @@
 - `maxbot/multi_agent/worker.py`
 - `maxbot/tools/multi_agent_tools.py`
 - `tests/test_multi_agent.py`
+- `tests/test_phase6_coordinator.py`
+- `tests/test_phase6_multi_agent_tools.py`
 
-**当前缺口：**
-- [ ] capability-aware worker routing
-- [ ] 依赖调度的严格测试
-- [ ] 汇总结果标准化
-- [ ] 双实现口径收敛
+**当前已完成的第二轮增量：**
+- [x] capability-aware worker routing（`coordinator.py`）
+- [x] 依赖任务完成后的 pending 重扫调度
+- [x] 汇总结果增加 `worker` 字段
+- [x] 无匹配 worker 时给出明确失败语义
+- [x] runtime `spawn_agent` 已支持 `allowed_tools`
+- [x] runtime `spawn_agents_parallel` 已统一为 `tasks` 数组输入
+- [x] runtime `agent_status` 已补齐
+- [x] `coordinator.py` 已真正通过 `WorkerAgent.execute_task()` 接入 `worker.py`
+- [x] Phase 6 协调器 / runtime tools 专项回归测试
+
+**当前剩余缺口：**
+- [ ] 双实现口径最终收敛
+- [ ] `WorkerConfig` 重复定义最终收敛
 
 **详细执行计划：**
 - `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
+- `docs/phase6-multi-agent-audit.md`
 
 ---
 
@@ -168,20 +185,25 @@
 
 ### 7.1 当前阶段状态
 
-**当前状态：🟡 核心已完成，但需补 compact hooks 与 profile 逻辑后正式验收**
+**当前状态：✅ compact hooks / profile / blocking path 已完成第一轮收口**
 
-**已完成：**
+**本轮已完成：**
 - ✅ HookEvent / HookManager / builtin_hooks
 - ✅ 主循环已接入 `SESSION_START / PRE_TOOL_USE / POST_TOOL_USE / SESSION_END / ERROR`
-- ✅ Hook 相关测试基线存在
+- ✅ `_compress_context()` 已接入 `PRE_COMPACT / POST_COMPACT`
+- ✅ `minimal / standard / strict` runtime profile 可观察行为已落地
+- ✅ strict 配置保护通过 `HookAbortError` 真正阻断
+- ✅ Phase 7 专项测试已补齐：
+  - `tests/test_hooks.py`
+  - `tests/test_phase7_hook_profiles.py`
 
-**当前缺口：**
-- [ ] `PRE_COMPACT` / `POST_COMPACT` 真正接入 `_compress_context()`
-- [ ] `minimal/standard/strict` profile 逻辑落地
-- [ ] profile / compact hooks 验收测试
+**后续增强项：**
+- [ ] 继续梳理 minimal profile 是否要更细粒度区分观察型 hook
+- [ ] 若后续需要，再扩展 compact summary 的持久化/统计用途
 
 **详细执行计划：**
 - `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
+- `docs/phase7-hook-audit.md`
 
 ---
 

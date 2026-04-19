@@ -30,7 +30,7 @@ from maxbot.sessions import SessionStore
 from maxbot.config.config_loader import get_config, load_config
 from maxbot.utils.logger import get_logger
 from maxbot.skills import SkillManager
-from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent
+from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent, HookAbortError
 from maxbot.learning import LearningLoop
 from maxbot.memory import MemPalaceAdapter
 
@@ -579,6 +579,8 @@ class Agent:
         try:
             context = HookContext(event=event, session_id=self.config.session_id, **kwargs)
             self._hook_manager.trigger_sync(event, context)
+        except HookAbortError:
+            raise
         except Exception as e:
             logger.error(f"Hook 触发失败 [{event}]: {e}")
 
@@ -630,9 +632,36 @@ class Agent:
         current_messages = self._message_manager.get_messages()
         keep_messages = 10
         if len(current_messages) > keep_messages:
+            before_message_count = len(current_messages)
+            before_tokens = sum(len((message.content or "")) for message in current_messages) // 4
+            self._trigger_hook(
+                HookEvent.PRE_COMPACT,
+                metadata={
+                    "before_message_count": before_message_count,
+                    "before_tokens": before_tokens,
+                    "keep_messages": keep_messages,
+                },
+            )
+
             system_msgs = [m for m in current_messages if m.role == "system"]
             recent_msgs = current_messages[-keep_messages:]
             self.messages = system_msgs + recent_msgs
+
+            after_messages = self._message_manager.get_messages()
+            after_message_count = len(after_messages)
+            after_tokens = sum(len((message.content or "")) for message in after_messages) // 4
+            self._trigger_hook(
+                HookEvent.POST_COMPACT,
+                metadata={
+                    "before_message_count": before_message_count,
+                    "after_message_count": after_message_count,
+                    "compressed_messages": before_message_count - after_message_count,
+                    "before_tokens": before_tokens,
+                    "after_tokens": after_tokens,
+                    "compressed_tokens": max(before_tokens - after_tokens, 0),
+                    "keep_messages": keep_messages,
+                },
+            )
 
     def _check_conversation_limit(self) -> bool:
         """检查是否超过会话轮询限制"""
