@@ -20,6 +20,8 @@ from typing import Any, Callable
 
 from maxbot.core.agent_loop import Agent, AgentConfig, Message
 from maxbot.core.tool_registry import ToolRegistry
+from maxbot.multi_agent.coordinator import Coordinator as RuntimeCoordinator
+from maxbot.multi_agent.worker import WorkerConfig as RuntimeWorkerConfig
 
 
 # ── 状态枚举 ──────────────────────────────────────────────
@@ -483,3 +485,15 @@ class WorkerPool:
             }.get(task.status, "?")
             lines.append(f"  {status_icon} [{task.worker_name or tid}] {task.description}{duration}")
         return "\n".join(lines)
+
+
+__all__ = [
+    "AgentDelegate",
+    "AgentStatus",
+    "AgentTask",
+    "Coordinator",
+    "RuntimeCoordinator",
+    "RuntimeWorkerConfig",
+    "SubTask",
+    "WorkerPool",
+]
