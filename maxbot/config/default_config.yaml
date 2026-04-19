@@ -66,6 +66,31 @@ session:
   # MemPalace wing（null = 自动按项目/上下文决定）
   mempalace_wing: null
 
+  # 是否启用运行时 Reflection 闭环
+  reflection_enabled: false
+
+  # critique/revise 最大轮数
+  reflection_max_revisions: 1
+
+  # 输出至少达到多少字符才进入 reflection
+  reflection_min_output_chars: 200
+
+  # 工具调用达到该阈值时按高风险路径触发 reflection
+  reflection_high_risk_tool_threshold: 2
+
+  # 允许进入 reflection 的任务类型
+  reflection_task_types:
+    - default
+
+  # reflection 出错时是否 fail-closed
+  reflection_fail_closed: false
+
+  # 是否启用运行时 metrics 采集
+  metrics_enabled: true
+
+  # trace 存储目录（null = ~/.maxbot/traces）
+  trace_store_dir: null
+
 # ==================== 技能配置 ====================
 skills:
   # 技能存储目录

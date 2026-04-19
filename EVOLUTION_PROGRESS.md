@@ -320,8 +320,10 @@ python3 -m pytest \
 - 阶段验证：`python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 
 ### 第八阶段：监控和分析
-- **状态：** ⏳ 待开始
-- 现状：缺少系统化使用分析、可视化与报告体系
+- **状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 三条主线已完成第一轮最小落地并通过专项测试）
+- 现状：已明确将 Phase 8 定义为“部署态进化基础设施阶段”，首批三条主线为 reflection runtime、metrics/trace/eval sample、memory/instinct/skill promotion policy
+- 当前已完成：`maxbot/reflection/*`、`maxbot/evals/*`、`maxbot/learning/promotion_policy.py`、`maxbot/knowledge/skill_distiller.py`、AgentConfig / YAML / config_loader 的 reflection + metrics 配置接入、`tests/test_phase8_reflection_loop.py`（`7 passed`）、`tests/test_phase8_metrics_pipeline.py`（`3 passed`）、`tests/test_phase8_memory_promotion_policy.py` / `tests/test_phase8_learning_memory_skill_boundary.py` / `tests/test_phase8_skill_distiller.py`（合计 `7 passed`）
+- 计划文档：`docs/phase8-reflection-memory-plan.md`
 
 ### 第九阶段：测试和质量保证
 - **状态：** ⏳ 待开始
@@ -360,10 +362,10 @@ python3 -m pytest \
 
 ### P0：启动 Phase 8 监控与分析系统
 
-1. 建立工具使用 / Agent 调用 / 性能指标采集基线
-2. 设计最小可交付 monitoring report 输出
-3. 补齐 Phase 8 专项计划与测试基线
-4. 保持 `EVOLUTION_PROGRESS.md` / `MAXBOT_EVOLUTION_PLAN.md` / ECC 映射文档口径一致
+1. ✅ Reflection runtime 第一轮已落地（`tests/test_phase8_reflection_loop.py` → `7 passed`）
+2. ✅ runtime metrics / trace 第一轮已落地（`tests/test_phase8_metrics_pipeline.py` → `3 passed`）
+3. ✅ memory / instinct / skill promotion policy 最小闭环已落地（Phase 8 promotion 测试合计 `7 passed`）
+4. 继续以 `docs/phase8-reflection-memory-plan.md` 为执行计划，向 Phase 9 的 grader / quality gate 与后续 harness optimization 打基础
 
 ### P1：继续补强 ECC 深水区能力
 

@@ -64,6 +64,14 @@ class SessionConfig:
     mempalace_enabled: bool = False
     mempalace_path: str | None = None
     mempalace_wing: str | None = None
+    reflection_enabled: bool = False
+    reflection_max_revisions: int = 1
+    reflection_min_output_chars: int = 200
+    reflection_high_risk_tool_threshold: int = 2
+    reflection_task_types: list[str] = field(default_factory=lambda: ["default"])
+    reflection_fail_closed: bool = False
+    metrics_enabled: bool = True
+    trace_store_dir: str | None = None
 
 
 @dataclass
@@ -302,6 +310,13 @@ class ConfigLoader:
             "MAXBOT_MEMPALACE_ENABLED": ("session", "mempalace_enabled"),
             "MAXBOT_MEMPALACE_PATH": ("session", "mempalace_path"),
             "MAXBOT_MEMPALACE_WING": ("session", "mempalace_wing"),
+            "MAXBOT_REFLECTION_ENABLED": ("session", "reflection_enabled"),
+            "MAXBOT_REFLECTION_MAX_REVISIONS": ("session", "reflection_max_revisions"),
+            "MAXBOT_REFLECTION_MIN_OUTPUT_CHARS": ("session", "reflection_min_output_chars"),
+            "MAXBOT_REFLECTION_HIGH_RISK_TOOL_THRESHOLD": ("session", "reflection_high_risk_tool_threshold"),
+            "MAXBOT_REFLECTION_FAIL_CLOSED": ("session", "reflection_fail_closed"),
+            "MAXBOT_METRICS_ENABLED": ("session", "metrics_enabled"),
+            "MAXBOT_TRACE_STORE_DIR": ("session", "trace_store_dir"),
             "MAXBOT_SESSION_ID": ("session", "session_id"),
             "MAXBOT_MAX_CONVERSATION_TURNS": ("session", "max_conversation_turns"),
             "MAXBOT_SKILLS_DIR": ("skills", "skills_dir"),
@@ -312,9 +327,9 @@ class ConfigLoader:
             value = os.environ.get(env_var)
             if value is not None:
                 # 转换类型
-                if env_var.endswith("_ENABLED"):
+                if env_var.endswith("_ENABLED") or env_var.endswith("_CLOSED"):
                     value = value.lower() in ("true", "1", "yes")
-                elif env_var.endswith("_ITERATIONS") or env_var.endswith("_TOKENS") or env_var.endswith("_TURNS"):
+                elif env_var.endswith("_ITERATIONS") or env_var.endswith("_TOKENS") or env_var.endswith("_TURNS") or env_var.endswith("_REVISIONS") or env_var.endswith("_CHARS") or env_var.endswith("_THRESHOLD"):
                     value = int(value)
                 elif env_var.endswith("_TEMPERATURE"):
                     value = float(value)

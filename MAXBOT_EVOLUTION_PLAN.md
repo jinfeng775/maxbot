@@ -249,15 +249,30 @@ python3 -m pytest \
 
 ---
 
-## 📊 第八阶段：监控和分析 (Week 15-16)
+## 📊 第八阶段：监控和分析 / 部署态进化基础设施 (Week 15-16)
 
-### 8.1 使用分析系统
+### 8.1 当前阶段目标
 
-**实现功能：**
+把 Phase 8 从“抽象监控报表阶段”扩展为 **MaxBot 部署态进化的基础设施入口**。  
+本阶段不直接引入高风险 self-play / 自动自改，而是先完成三条主线：
+
+- Reflection runtime（draft → critique → revise → accept）
+- Metrics / trace / evaluation sample 管线
+- Memory / Instinct / Skill promotion policy
+
+**当前状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 已完成第一轮最小落地并通过专项测试）
+
+**本阶段首批交付目标：**
 - 工具使用统计
 - 智能体调用追踪
 - 性能指标收集
 - 用户行为分析
+- Reflection 策略与 revise 闭环
+- 结构化 trace / metrics 存储
+- 长期知识升级规则（memory / instinct / skill）
+
+**阶段计划文档：**
+- `docs/phase8-reflection-memory-plan.md`
 
 ---
 

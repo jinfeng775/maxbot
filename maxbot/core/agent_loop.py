@@ -33,6 +33,8 @@ from maxbot.skills import SkillManager
 from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent, HookAbortError
 from maxbot.learning import LearningLoop
 from maxbot.memory import MemPalaceAdapter
+from maxbot.reflection import ReflectionCritic, ReflectionLoop, ReflectionPolicy
+from maxbot.evals import RuntimeMetrics, RuntimeMetricsCollector, TraceStore
 
 # 获取 Agent 日志器
 logger = get_logger("agent")
@@ -74,6 +76,14 @@ class AgentConfig:
     mempalace_enabled: bool | None = None
     mempalace_path: str | None = None
     mempalace_wing: str | None = None
+    reflection_enabled: bool | None = None
+    reflection_max_revisions: int | None = None
+    reflection_min_output_chars: int | None = None
+    reflection_high_risk_tool_threshold: int | None = None
+    reflection_task_types: list[str] | None = None
+    reflection_fail_closed: bool | None = None
+    metrics_enabled: bool | None = None
+    trace_store_dir: str | None = None
     session_id: str | None = None
     session_store: Any | None = None
     auto_save: bool | None = None
@@ -116,6 +126,14 @@ class AgentConfig:
             ("session", "mempalace_enabled", "mempalace_enabled"),
             ("session", "mempalace_path", "mempalace_path"),
             ("session", "mempalace_wing", "mempalace_wing"),
+            ("session", "reflection_enabled", "reflection_enabled"),
+            ("session", "reflection_max_revisions", "reflection_max_revisions"),
+            ("session", "reflection_min_output_chars", "reflection_min_output_chars"),
+            ("session", "reflection_high_risk_tool_threshold", "reflection_high_risk_tool_threshold"),
+            ("session", "reflection_task_types", "reflection_task_types"),
+            ("session", "reflection_fail_closed", "reflection_fail_closed"),
+            ("session", "metrics_enabled", "metrics_enabled"),
+            ("session", "trace_store_dir", "trace_store_dir"),
             ("session", "session_id", "session_id"),
             ("session", "auto_save", "auto_save"),
             ("session", "max_conversation_turns", "max_conversation_turns"),
@@ -158,6 +176,14 @@ class AgentConfig:
             "mempalace_enabled": False,
             "mempalace_path": None,
             "mempalace_wing": None,
+            "reflection_enabled": False,
+            "reflection_max_revisions": 1,
+            "reflection_min_output_chars": 200,
+            "reflection_high_risk_tool_threshold": 2,
+            "reflection_task_types": ["default"],
+            "reflection_fail_closed": False,
+            "metrics_enabled": True,
+            "trace_store_dir": None,
             "auto_save": True,
             "max_conversation_turns": 140,
         }
@@ -365,6 +391,28 @@ class Agent:
             except Exception as e:
                 logger.warning(f"技能管理器初始化失败: {e}")
                 self._skill_manager = None
+
+        # Reflection 运行时初始化
+        self._reflection_policy = ReflectionPolicy(
+            enabled=bool(self.config.reflection_enabled),
+            max_revisions=self.config.reflection_max_revisions or 1,
+            min_output_chars=self.config.reflection_min_output_chars or 200,
+            high_risk_tool_threshold=self.config.reflection_high_risk_tool_threshold or 2,
+            apply_to_task_types=self.config.reflection_task_types or ["default"],
+        )
+        self._reflection_loop = ReflectionLoop(
+            critic=ReflectionCritic(),
+            max_revisions=self.config.reflection_max_revisions or 1,
+        )
+
+        # Runtime metrics / trace 初始化
+        self._runtime_metrics = RuntimeMetricsCollector()
+        trace_dir = self.config.trace_store_dir or (Path.home() / ".maxbot" / "traces")
+        self._trace_store = TraceStore(trace_dir)
+        self._active_run_depth = 0
+        self._active_run_start: float | None = None
+        self._active_root_user_message: str | None = None
+        self._active_run_tool_calls = 0
 
         # 加载历史会话
         self._load_session()
@@ -1006,6 +1054,70 @@ class Agent:
             "registry_tools": len(self._registry) if self._registry is not None else 0,
         }
 
+    def _apply_reflection(self, draft: str, user_message: str, *, tool_calls: int = 0):
+        decision = self._reflection_policy.should_reflect(
+            task_type="default",
+            output_text=draft,
+            tool_calls=tool_calls,
+            metadata={"risk_level": "medium", "user_message": user_message},
+        )
+
+        return self._reflection_loop.run(
+            draft=draft,
+            decision=decision,
+            revise_fn=lambda current, feedback: f"{current}\n\n[Reflection Revision]\n{feedback}",
+            context={"task_type": "default", "user_message": user_message},
+        )
+
+    def _record_runtime_metrics(
+        self,
+        *,
+        user_message: str,
+        final_output: str,
+        tool_calls: int,
+        reflection_result: Any | None,
+        elapsed: float,
+        success: bool,
+    ) -> None:
+        if not self.config.metrics_enabled:
+            return
+
+        revision_count = 0
+        reflection_count = 0
+        if reflection_result is not None:
+            revision_count = getattr(reflection_result, "revision_count", 0)
+            reflection_count = 1 if getattr(reflection_result, "reflection_applied", False) else 0
+
+        task_id = f"task-{int(time.time() * 1000)}"
+        metrics = RuntimeMetrics(
+            task_id=task_id,
+            session_id=self.config.session_id,
+            user_message=user_message,
+            tool_calls=tool_calls,
+            reflection_count=reflection_count,
+            revision_count=revision_count,
+            success=success,
+            worker_count=0,
+            elapsed=elapsed,
+        )
+        self._runtime_metrics.add(metrics)
+        self._trace_store.write_trace(
+            {
+                "task_id": task_id,
+                "session_id": self.config.session_id,
+                "user_message": user_message,
+                "final_output": final_output,
+                "tool_calls": tool_calls,
+                "revision_count": revision_count,
+                "reflection_count": reflection_count,
+                "elapsed": elapsed,
+                "success": success,
+            }
+        )
+
+    def get_runtime_metrics(self) -> dict[str, Any]:
+        return self._runtime_metrics.summary()
+
     def run(self, user_message: str) -> str:
         """
         运行对话
@@ -1020,6 +1132,13 @@ class Agent:
         self._message_manager.append(Message(role="user", content=user_message))
         logger.debug(f"添加用户消息: {len(user_message)} 字符")
 
+        is_root_run = self._active_run_depth == 0
+        if is_root_run:
+            self._active_run_start = time.time()
+            self._active_root_user_message = user_message
+            self._active_run_tool_calls = 0
+        self._active_run_depth += 1
+
         # 会话开始 Hook
         if user_message:
             self._trigger_hook(
@@ -1028,6 +1147,8 @@ class Agent:
             )
 
         try:
+            run_start = time.time()
+            runtime_tool_calls = 0
             # 检查会话轮询限制
             if self._check_conversation_limit():
                 response = (
@@ -1134,6 +1255,8 @@ class Agent:
                             "arguments": tool_call.function.arguments,
                         },
                     })
+                    runtime_tool_calls += 1
+                    self._active_run_tool_calls += 1
 
                     # 保存工具响应
                     tool_response = Message(
@@ -1154,8 +1277,31 @@ class Agent:
             self._save_session()
             self._trigger_hook(HookEvent.SESSION_END)
 
-            logger.debug(f"对话完成，返回响应: {len(assistant_message.content or '')} 字符")
-            return assistant_message.content or ""
+            final_output = assistant_message.content or ""
+            reflection_result = None
+            if self.config.reflection_enabled:
+                try:
+                    reflection_result = self._apply_reflection(
+                        final_output,
+                        user_message,
+                        tool_calls=runtime_tool_calls,
+                    )
+                    final_output = reflection_result.final_output
+                except Exception:
+                    if self.config.reflection_fail_closed:
+                        raise
+
+            self._record_runtime_metrics(
+                user_message=self._active_root_user_message or user_message,
+                final_output=final_output,
+                tool_calls=self._active_run_tool_calls,
+                reflection_result=reflection_result,
+                elapsed=(time.time() - self._active_run_start) if self._active_run_start is not None else (time.time() - run_start),
+                success=True,
+            )
+
+            logger.debug(f"对话完成，返回响应: {len(final_output)} 字符")
+            return final_output
         except Exception as e:
             self._trigger_hook(
                 HookEvent.ERROR,
@@ -1165,6 +1311,12 @@ class Agent:
                 },
             )
             raise
+        finally:
+            self._active_run_depth -= 1
+            if self._active_run_depth == 0:
+                self._active_run_start = None
+                self._active_root_user_message = None
+                self._active_run_tool_calls = 0
 
     def _get_tools(self) -> list[dict]:
         """获取可用工具列表"""
