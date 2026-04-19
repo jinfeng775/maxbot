@@ -117,6 +117,31 @@ class TestReflectionLoop:
         critic.critique.assert_not_called()
         revise_fn.assert_not_called()
 
+    def test_loop_stops_when_revision_limit_reached(self):
+        from maxbot.reflection.loop import ReflectionLoop
+        from maxbot.reflection.policy import ReflectionDecision
+
+        critic = MagicMock()
+        critic.critique.side_effect = [
+            {"revise": True, "feedback": "第一轮修订"},
+            {"revise": True, "feedback": "第二轮修订"},
+        ]
+        revise_fn = MagicMock(side_effect=["修订后的答案"])
+
+        loop = ReflectionLoop(critic=critic, max_revisions=1)
+        result = loop.run(
+            draft="初稿答案",
+            decision=ReflectionDecision(enabled=True, reason="high_risk_tool_usage", max_revisions=3),
+            revise_fn=revise_fn,
+            context={"task_type": "default"},
+        )
+
+        assert result.final_output == "修订后的答案"
+        assert result.revision_count == 1
+        assert len(result.critiques) == 2
+        assert result.stopped_reason == "max_revisions_reached"
+        revise_fn.assert_called_once_with("初稿答案", "第一轮修订")
+
 
 class TestAgentLoopReflectionIntegration:
     def _make_agent(self, client_mock: MagicMock) -> Agent:

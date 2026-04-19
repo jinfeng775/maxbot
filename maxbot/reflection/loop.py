@@ -12,6 +12,7 @@ class ReflectionResult:
     revision_count: int = 0
     reflection_applied: bool = False
     critiques: list[dict[str, Any]] = field(default_factory=list)
+    stopped_reason: str = "accepted"
 
 
 class ReflectionLoop:
@@ -33,19 +34,23 @@ class ReflectionLoop:
                 revision_count=0,
                 reflection_applied=False,
                 critiques=[],
+                stopped_reason="skipped",
             )
 
         current = draft
         critiques: list[dict[str, Any]] = []
         revisions = 0
         max_revisions = min(decision.max_revisions, self.max_revisions)
+        stopped_reason = "accepted"
 
         while True:
             critique = self.critic.critique(current, context or {})
             critiques.append(critique)
             if not critique.get("revise"):
+                stopped_reason = "accepted"
                 break
             if revisions >= max_revisions:
+                stopped_reason = "max_revisions_reached"
                 break
 
             feedback = critique.get("feedback", "")
@@ -57,4 +62,5 @@ class ReflectionLoop:
             revision_count=revisions,
             reflection_applied=True,
             critiques=critiques,
+            stopped_reason=stopped_reason,
         )

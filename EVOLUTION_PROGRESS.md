@@ -332,9 +332,9 @@ python3 -m pytest \
 - 阶段验证：`python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 
 ### 第八阶段：监控和分析
-- **状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 三条主线已完成第一轮最小落地，并开始补齐第二轮结构化指标）
+- **状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 三条主线已完成第一轮最小落地，并开始补齐第二轮结构化指标与 reflection 策略细化）
 - 现状：已明确将 Phase 8 定义为“部署态进化基础设施阶段”，首批三条主线为 reflection runtime、metrics/trace/eval sample、memory/instinct/skill promotion policy
-- 当前已完成：`maxbot/reflection/*`、`maxbot/evals/*`、`maxbot/learning/promotion_policy.py`、`maxbot/knowledge/skill_distiller.py`、AgentConfig / YAML / config_loader 的 reflection + metrics 配置接入、`tests/test_phase8_reflection_loop.py`（`7 passed`）、`tests/test_phase8_metrics_pipeline.py` + `tests/test_phase8_trace_store.py`（`7 passed`，已补 memory hit/miss、instinct matches、parallel worker count、latest trace 读取）、`tests/test_phase8_memory_promotion_policy.py` / `tests/test_phase8_learning_memory_skill_boundary.py` / `tests/test_phase8_skill_distiller.py`（合计 `7 passed`）
+- 当前已完成：`maxbot/reflection/*`、`maxbot/evals/*`、`maxbot/learning/promotion_policy.py`、`maxbot/knowledge/skill_distiller.py`、AgentConfig / YAML / config_loader 的 reflection + metrics 配置接入、`tests/test_phase8_reflection_policy.py` + `tests/test_phase8_reflection_loop.py`（`10 passed`，已补 wildcard task type、revision-limit stopped_reason）、`tests/test_phase8_metrics_pipeline.py` + `tests/test_phase8_trace_store.py`（`7 passed`，已补 memory hit/miss、instinct matches、parallel worker count、latest trace 读取）、`tests/test_phase8_memory_promotion_policy.py` / `tests/test_phase8_learning_memory_skill_boundary.py` / `tests/test_phase8_skill_distiller.py`（合计 `7 passed`）
 - 计划文档：`docs/phase8-reflection-memory-plan.md`
 
 ### 第九阶段：测试和质量保证

@@ -82,6 +82,7 @@ Phase 8 完成后，MaxBot 应具备：
 - revise 次数达到上限后停止
 - 低风险短回答可跳过 reflection
 - strict 模式下 critique / revise 异常时 fail-closed
+- `apply_to_task_types=["*"]` 时任意 task type 可进入策略
 
 **Step 2: Run tests to verify failure**
 Run:
@@ -89,6 +90,12 @@ Run:
 python3 -m pytest tests/test_phase8_reflection_policy.py tests/test_phase8_reflection_loop.py -q
 ```
 Expected: FAIL — reflection module / policy / loop 尚不存在
+
+**当前收口状态（2026-04-19）**
+- ✅ 已补 `tests/test_phase8_reflection_policy.py`
+- ✅ 已补 wildcard task type 与 revision-limit 停止原因测试
+- ✅ `ReflectionResult.stopped_reason` 已落地（`accepted` / `skipped` / `max_revisions_reached`）
+- ✅ 当前专项结果：`tests/test_phase8_reflection_policy.py tests/test_phase8_reflection_loop.py -q` → `10 passed`
 
 ### Task A2: 实现 reflection 模块最小闭环
 

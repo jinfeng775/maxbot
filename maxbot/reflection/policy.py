@@ -39,7 +39,8 @@ class ReflectionPolicy:
         if not self.enabled:
             return ReflectionDecision(False, "reflection_disabled", self.max_revisions)
 
-        if task_type not in self.apply_to_task_types:
+        task_type_enabled = "*" in self.apply_to_task_types or task_type in self.apply_to_task_types
+        if not task_type_enabled:
             return ReflectionDecision(False, "task_type_not_enabled", self.max_revisions)
 
         if len((output_text or "").strip()) < self.min_output_chars:

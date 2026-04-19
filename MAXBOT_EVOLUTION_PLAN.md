@@ -285,7 +285,7 @@ python3 -m pytest \
 - Metrics / trace / evaluation sample 管线
 - Memory / Instinct / Skill promotion policy
 
-**当前状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 已完成第一轮最小落地，并开始补齐第二轮结构化指标）
+**当前状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 已完成第一轮最小落地，并开始补齐第二轮结构化指标与 reflection 策略细化）
 
 **本阶段首批交付目标：**
 - 工具使用统计
