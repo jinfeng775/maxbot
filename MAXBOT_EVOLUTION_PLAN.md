@@ -124,6 +124,8 @@
 
 把现有安全 reviewer / security review system 提升为“可执行工作流 + 质量门”的正式阶段交付。
 
+**当前状态：✅ 已完成**
+
 **当前已有基础：**
 - `maxbot/agents/security_reviewer_agent.py`
 - `maxbot/security/security_review_system.py`
@@ -133,15 +135,35 @@
 - `tests/test_phase5_security_pipeline.py`
 - `tests/test_phase5_quality_gate.py`
 - `tests/test_phase5_security_tool.py`
+- `tests/test_phase5_security_review_system.py`
 
-**当前缺口：**
-- [ ] 统一安全扫描 pipeline（基础版已落地，待增强）
-- [x] quality gate / severity gate（基础版已落地）
-- [x] 结构化 scan report（基础版已落地）
-- [ ] 端到端测试基线
+**当前已完成：**
+- [x] 统一安全扫描 pipeline
+- [x] quality gate / severity gate
+- [x] 结构化 scan report
+- [x] 对扫描器失败与未知检查名 fail-closed
+- [x] `security_scan` 工具入口
+- [x] 阶段专项测试基线
+
+**阶段验证：**
+```bash
+python3 -m pytest \
+  tests/test_phase5_security_review_system.py \
+  tests/test_phase5_security_pipeline.py \
+  tests/test_phase5_quality_gate.py \
+  tests/test_phase5_security_tool.py -q
+```
+
+结果：`11 passed`
+
+**后续增强项：**
+- [ ] 与更深 verification loop 整合
+- [ ] 扩展更丰富的 security rule / policy 集
+- [ ] 更强端到端扫描 workflow
 
 **详细执行计划：**
-- `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
+- `docs/phase5-security-validation-plan.md`
+- `docs/phase5-phase6-completion-plan.md`
 
 ---
 
@@ -151,6 +173,8 @@
 
 将当前已存在的多 Agent 原型收敛为真实可交付的协调与编排系统。
 
+**当前状态：🟡 第二轮收敛推进中**
+
 **当前已有基础：**
 - `maxbot/multi_agent/__init__.py`
 - `maxbot/multi_agent/coordinator.py`
@@ -159,25 +183,27 @@
 - `tests/test_multi_agent.py`
 - `tests/test_phase6_coordinator.py`
 - `tests/test_phase6_multi_agent_tools.py`
+- `tests/test_phase6_multi_agent_compat.py`
 
-**当前已完成的第二轮增量：**
+**当前已完成：**
 - [x] capability-aware worker routing（`coordinator.py`）
 - [x] 依赖任务完成后的 pending 重扫调度
+- [x] downstream dependency failure 显式失败
 - [x] 汇总结果增加 `worker` 字段
-- [x] 无匹配 worker 时给出明确失败语义
-- [x] runtime `spawn_agent` 已支持 `allowed_tools`
-- [x] runtime `spawn_agents_parallel` 已统一为 `tasks` 数组输入
+- [x] runtime `spawn_agent` 支持 `allowed_tools`
+- [x] runtime `spawn_agents_parallel` 使用 `tasks` 数组输入
 - [x] runtime `agent_status` 已补齐
 - [x] `coordinator.py` 已真正通过 `WorkerAgent.execute_task()` 接入 `worker.py`
-- [x] Phase 6 协调器 / runtime tools 专项回归测试
+- [x] package-level `LegacyCoordinator` / `RuntimeCoordinator` / `RuntimeWorkerConfig` 导出清晰
 
 **当前剩余缺口：**
-- [ ] 双实现口径最终收敛
-- [ ] `WorkerConfig` 重复定义最终收敛
+- [ ] legacy / runtime / tools 层子 Agent 执行契约最终收口
+- [ ] Phase 6 完成态专项回归测试
+- [ ] 文档口径切换到“已完成”
 
 **详细执行计划：**
-- `docs/phase4-step5-phase5-phase6-phase7-consolidated-plan.md`
 - `docs/phase6-multi-agent-audit.md`
+- `docs/phase5-phase6-completion-plan.md`
 
 ---
 
@@ -301,5 +327,8 @@ Week 23-24: 持续改进
 **计划状态**: ✅ 第一阶段已完成  
 **计划状态**: ✅ 第二阶段已完成  
 **计划状态**: ✅ 第三阶段 MVP 已完成  
-**当前阶段**: 第四阶段前置准备 / 记忆持久化系统  
+**计划状态**: ✅ 第四阶段已完成  
+**计划状态**: ✅ 第五阶段已完成  
+**计划状态**: ✅ 第七阶段已完成  
+**当前阶段**: 第六阶段第二轮收敛 / 多智能体协作系统  
 **预计完成**: 2025 年 12 月

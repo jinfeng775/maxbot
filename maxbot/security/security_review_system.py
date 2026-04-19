@@ -14,6 +14,7 @@ import json
 from pathlib import Path
 from dataclasses import dataclass
 
+
 @dataclass
 class SecurityCheck:
     """Security check configuration"""
@@ -26,7 +27,7 @@ class SecurityCheck:
 class SecurityReviewSystem:
     """
     Automated security review system for MaxBot
-    
+
     Features:
     - Automated security scanning on code changes
     - Integration with external security tools (bandit, safety, pip-audit)
@@ -34,11 +35,11 @@ class SecurityReviewSystem:
     - Vulnerability database tracking
     - Security policy enforcement
     """
-    
+
     def __init__(self, project_root: str):
         self.project_root = Path(project_root)
         self.security_reviewer_agent = None  # Will be initialized on demand
-        
+
         # Security tools configuration
         self.security_checks = {
             "bandit": SecurityCheck(
@@ -66,7 +67,7 @@ class SecurityReviewSystem:
                 enabled=False
             )
         }
-        
+
         # Security policy settings
         self.security_policy = {
             "fail_on_critical": True,
@@ -75,14 +76,14 @@ class SecurityReviewSystem:
             "require_input_validation": True,
             "max_severity_allowed": "medium"  # max allowed in CI/CD
         }
-    
+
     def run_security_scan(self, check_name: Optional[str] = None) -> Dict:
         """
         Run security scans on the codebase
-        
+
         Args:
             check_name: Specific security check to run (or None for all)
-            
+
         Returns:
             Combined security scan results
         """
@@ -96,36 +97,49 @@ class SecurityReviewSystem:
                 "low": 0
             },
             "findings": [],
+            "scan_failures": [],
             "passed": True
         }
-        
-        checks_to_run = [check_name] if check_name else self.security_checks.keys()
-        
+
+        if check_name:
+            checks_to_run = [check_name]
+        else:
+            checks_to_run = list(self.security_checks.keys())
+
         for check_name in checks_to_run:
             if check_name not in self.security_checks:
+                failure = {
+                    "check": check_name,
+                    "error": f"Unknown security check: {check_name}",
+                    "severity": "high",
+                }
+                results["scan_failures"].append(failure)
+                results["findings"].append(dict(failure))
                 continue
-            
+
             check = self.security_checks[check_name]
             if not check.enabled:
                 continue
-            
+
             check_result = self._run_security_check(check)
             results["checks_run"].append(check_name)
-            
+
             if check_result["success"]:
                 results["findings"].extend(check_result["findings"])
                 results["by_severity"][check.severity] += len(check_result["findings"])
                 results["total_issues"] += len(check_result["findings"])
             else:
-                results["findings"].append({
+                failure = {
                     "check": check_name,
                     "error": check_result["error"],
-                    "severity": check.severity
-                })
-        
+                    "severity": check.severity,
+                }
+                results["scan_failures"].append(failure)
+                results["findings"].append(dict(failure))
+
         # Determine if scan passed
         results["passed"] = self._evaluate_scan_results(results)
-        
+
         return results
     
     def _run_security_check(self, check: SecurityCheck) -> Dict:
@@ -274,22 +288,25 @@ class SecurityReviewSystem:
     
     def _evaluate_scan_results(self, results: Dict) -> bool:
         """Evaluate if scan results pass based on security policy"""
+        if results.get("scan_failures"):
+            return False
+
         policy = self.security_policy
-        
+
         if policy["fail_on_critical"] and results["by_severity"]["critical"] > 0:
             return False
-        
+
         if policy["fail_on_high"] and results["by_severity"]["high"] > 0:
             return False
-        
+
         max_allowed = policy["max_severity_allowed"]
         severity_order = ["low", "medium", "high", "critical"]
         max_index = severity_order.index(max_allowed)
-        
+
         for severity in severity_order:
             if severity_order.index(severity) > max_index and results["by_severity"][severity] > 0:
                 return False
-        
+
         return True
     
     def review_before_commit(self, files_changed: List[str]) -> Dict:

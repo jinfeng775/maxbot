@@ -27,6 +27,7 @@ def run_security_pipeline(system: Any, check_name: str | None = None) -> dict[st
         },
         "by_severity": by_severity,
         "findings": results.get("findings", []),
+        "scan_failures": results.get("scan_failures", []),
         "passed": results.get("passed", True),
     }
     return report
@@ -49,4 +50,5 @@ def evaluate_quality_gate(report: dict[str, Any], policy: dict[str, bool] | None
         "passed": blocking_severity is None,
         "blocking_severity": blocking_severity,
         "total_issues": report.get("summary", {}).get("total_issues", 0),
+        "scan_failures": report.get("scan_failures", []),
     }

@@ -33,12 +33,14 @@ def test_security_pipeline_handles_failed_scan_tool():
                 "total_issues": 0,
                 "by_severity": {"critical": 0, "high": 0, "medium": 0, "low": 0},
                 "findings": [{"severity": "high", "error": "tool missing", "check": "bandit"}],
+                "scan_failures": [{"check": "bandit", "error": "tool missing", "severity": "high"}],
                 "passed": False,
             }
 
     report = run_security_pipeline(FakeSystem(), check_name="bandit")
     assert report["summary"]["total_issues"] == 0
     assert report["findings"][0]["error"] == "tool missing"
+    assert report["scan_failures"] == [{"check": "bandit", "error": "tool missing", "severity": "high"}]
 
 
 
