@@ -413,6 +413,9 @@ class Agent:
         self._active_run_start: float | None = None
         self._active_root_user_message: str | None = None
         self._active_run_tool_calls = 0
+        self._active_run_worker_count = 0
+        self._last_memory_context_hit = False
+        self._last_instinct_match_count = 0
 
         # 加载历史会话
         self._load_session()
@@ -562,11 +565,15 @@ class Agent:
 
         def _on_session_start(context: HookContext):
             user_message = context.metadata.get("user_message", "")
-            self._learning_loop.on_user_message(
+            suggestion = self._learning_loop.on_user_message(
                 session_id=context.session_id or self.config.session_id or "unknown",
                 user_message=user_message,
                 context=context.metadata,
             )
+            if suggestion:
+                match = suggestion.get("match") if isinstance(suggestion, dict) else None
+                if match:
+                    self._last_instinct_match_count = 1
 
         def _on_pre_tool_use(context: HookContext):
             self._learning_loop.on_tool_call(
@@ -821,12 +828,14 @@ class Agent:
 
         try:
             sections: list[str] = []
+            self._last_memory_context_hit = False
 
             if self.config.memory_enabled and self.memory is not None:
                 memory_context = self._build_memory_context()
                 if memory_context:
                     logger.info(f"注入记忆内容: {len(memory_context)} 字符")
                     sections.append(f"相关记忆:\n\n{memory_context}")
+                    self._last_memory_context_hit = True
 
             if self._skill_manager:
                 # 获取匹配的技能内容
@@ -1078,6 +1087,10 @@ class Agent:
         reflection_result: Any | None,
         elapsed: float,
         success: bool,
+        memory_hits: int = 0,
+        memory_misses: int = 0,
+        instinct_matches: int = 0,
+        worker_count: int = 0,
     ) -> None:
         if not self.config.metrics_enabled:
             return
@@ -1096,8 +1109,11 @@ class Agent:
             tool_calls=tool_calls,
             reflection_count=reflection_count,
             revision_count=revision_count,
+            memory_hits=memory_hits,
+            memory_misses=memory_misses,
+            instinct_matches=instinct_matches,
             success=success,
-            worker_count=0,
+            worker_count=worker_count,
             elapsed=elapsed,
         )
         self._runtime_metrics.add(metrics)
@@ -1110,6 +1126,10 @@ class Agent:
                 "tool_calls": tool_calls,
                 "revision_count": revision_count,
                 "reflection_count": reflection_count,
+                "memory_hits": memory_hits,
+                "memory_misses": memory_misses,
+                "instinct_matches": instinct_matches,
+                "worker_count": worker_count,
                 "elapsed": elapsed,
                 "success": success,
             }
@@ -1137,6 +1157,8 @@ class Agent:
             self._active_run_start = time.time()
             self._active_root_user_message = user_message
             self._active_run_tool_calls = 0
+            self._active_run_worker_count = 0
+            self._last_instinct_match_count = 0
         self._active_run_depth += 1
 
         # 会话开始 Hook
@@ -1257,6 +1279,12 @@ class Agent:
                     })
                     runtime_tool_calls += 1
                     self._active_run_tool_calls += 1
+                    if tool_name == "spawn_agents_parallel":
+                        try:
+                            parallel_payload = json.loads(result)
+                            self._active_run_worker_count += int(parallel_payload.get("total", 0))
+                        except (json.JSONDecodeError, ValueError, TypeError):
+                            pass
 
                     # 保存工具响应
                     tool_response = Message(
@@ -1291,6 +1319,11 @@ class Agent:
                     if self.config.reflection_fail_closed:
                         raise
 
+            memory_hits = 1 if self._last_memory_context_hit else 0
+            memory_misses = 0 if self._last_memory_context_hit else 1
+            instinct_matches = self._last_instinct_match_count
+            worker_count = self._active_run_worker_count
+
             self._record_runtime_metrics(
                 user_message=self._active_root_user_message or user_message,
                 final_output=final_output,
@@ -1298,6 +1331,10 @@ class Agent:
                 reflection_result=reflection_result,
                 elapsed=(time.time() - self._active_run_start) if self._active_run_start is not None else (time.time() - run_start),
                 success=True,
+                memory_hits=memory_hits,
+                memory_misses=memory_misses,
+                instinct_matches=instinct_matches,
+                worker_count=worker_count,
             )
 
             logger.debug(f"对话完成，返回响应: {len(final_output)} 字符")
@@ -1317,6 +1354,8 @@ class Agent:
                 self._active_run_start = None
                 self._active_root_user_message = None
                 self._active_run_tool_calls = 0
+                self._active_run_worker_count = 0
+                self._last_instinct_match_count = 0
 
     def _get_tools(self) -> list[dict]:
         """获取可用工具列表"""

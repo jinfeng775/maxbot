@@ -200,6 +200,11 @@ python3 -m pytest tests/test_phase8_metrics_pipeline.py tests/test_phase8_trace_
 ```
 Expected: PASS
 
+**当前收口状态（2026-04-19）**
+- ✅ 已落地 `memory_hits / memory_misses / instinct_matches / worker_count` 四类结构化指标
+- ✅ `TraceStore.latest()` 已补齐，最近一次 trace 读取路径已具备专项回归
+- ✅ 当前专项结果：`tests/test_phase8_metrics_pipeline.py tests/test_phase8_trace_store.py -q` → `7 passed`
+
 ---
 
 ## 4. Workstream C：Memory / Instinct / Skill Promotion Policy

@@ -16,7 +16,9 @@ class TraceStore:
         trace_id = payload.get("trace_id") or str(uuid.uuid4())
         record = dict(payload)
         record.setdefault("trace_id", trace_id)
-        record.setdefault("created_at", time.time())
+        created_at_ns = time.time_ns()
+        record.setdefault("created_at", created_at_ns / 1_000_000_000)
+        record.setdefault("created_at_ns", created_at_ns)
         path = self.base_dir / f"{trace_id}.json"
         path.write_text(json.dumps(record, ensure_ascii=False, indent=2), encoding="utf-8")
         return trace_id
@@ -26,5 +28,18 @@ class TraceStore:
         return json.loads(path.read_text(encoding="utf-8"))
 
     def list_recent(self, limit: int = 10) -> list[dict[str, Any]]:
-        files = sorted(self.base_dir.glob("*.json"), key=lambda p: p.stat().st_mtime, reverse=True)
-        return [json.loads(path.read_text(encoding="utf-8")) for path in files[:limit]]
+        records = [json.loads(path.read_text(encoding="utf-8")) for path in self.base_dir.glob("*.json")]
+        records.sort(
+            key=lambda record: (
+                record.get("created_at_ns", int(record.get("created_at", 0) * 1_000_000_000)),
+                record.get("trace_id", ""),
+            ),
+            reverse=True,
+        )
+        return records[:limit]
+
+    def latest(self) -> dict[str, Any] | None:
+        recent = self.list_recent(limit=1)
+        if not recent:
+            return None
+        return recent[0]

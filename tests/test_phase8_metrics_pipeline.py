@@ -84,6 +84,96 @@ class TestPhase8MetricsPipeline:
         assert summary["tool_calls"] == 1
         assert summary["success_count"] == 1
 
+    def test_agent_metrics_capture_memory_hits_and_instinct_matches(self, tmp_path: Path):
+        message = SimpleNamespace(content="这是一个需要记忆增强的答案输出", tool_calls=None)
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+
+        agent = self._make_agent(client, tmp_path)
+
+        with patch("maxbot.core.agent_loop._retry_api_call", side_effect=lambda fn, **_: fn()), \
+             patch.object(agent, "_save_session", return_value=None), \
+             patch.object(agent, "_build_memory_context", return_value="# 持久记忆\n## user\npreferred_language: zh-CN"), \
+             patch.object(agent._learning_loop, "on_user_message", return_value={"match": {"instinct_id": "instinct-1"}}), \
+             patch.object(agent, "_apply_reflection", return_value=SimpleNamespace(
+                 final_output="修订后的最终答案",
+                 revision_count=1,
+                 reflection_applied=True,
+                 critiques=[{"feedback": "请补充边界条件", "revise": True}],
+             )):
+            result = agent.run("请输出需要反思且需要记忆增强的答案")
+
+        assert result == "修订后的最终答案"
+        summary = agent.get_runtime_metrics()
+        assert summary["memory_hits"] == 1
+        assert summary["memory_misses"] == 0
+        assert summary["instinct_matches"] == 1
+
+        latest_trace = agent._trace_store.latest()
+        assert latest_trace["memory_hits"] == 1
+        assert latest_trace["instinct_matches"] == 1
+
+    def test_agent_metrics_capture_memory_miss_when_context_empty(self, tmp_path: Path):
+        message = SimpleNamespace(content="这是一个普通答案输出", tool_calls=None)
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+
+        agent = self._make_agent(client, tmp_path)
+
+        with patch("maxbot.core.agent_loop._retry_api_call", side_effect=lambda fn, **_: fn()), \
+             patch.object(agent, "_save_session", return_value=None), \
+             patch.object(agent, "_build_memory_context", return_value=""), \
+             patch.object(agent._learning_loop, "on_user_message", return_value=None), \
+             patch.object(agent, "_apply_reflection", return_value=SimpleNamespace(
+                 final_output="普通最终答案",
+                 revision_count=0,
+                 reflection_applied=False,
+                 critiques=[],
+             )):
+            result = agent.run("请输出普通答案")
+
+        assert result == "普通最终答案"
+        summary = agent.get_runtime_metrics()
+        assert summary["memory_hits"] == 0
+        assert summary["memory_misses"] == 1
+        assert summary["instinct_matches"] == 0
+
+    def test_agent_metrics_capture_worker_count_from_parallel_agent_tool(self, tmp_path: Path):
+        tool_call = SimpleNamespace(
+            id="call-parallel-1",
+            type="function",
+            function=SimpleNamespace(name="spawn_agents_parallel", arguments='{"tasks": [{"task": "a"}, {"task": "b"}]}'),
+        )
+        first_message = SimpleNamespace(content="", tool_calls=[tool_call])
+        second_message = SimpleNamespace(content="并行任务执行完毕", tool_calls=None)
+        responses = [
+            SimpleNamespace(choices=[SimpleNamespace(message=first_message)]),
+            SimpleNamespace(choices=[SimpleNamespace(message=second_message)]),
+        ]
+
+        client = MagicMock()
+        client.chat.completions.create.side_effect = responses
+
+        agent = self._make_agent(client, tmp_path)
+
+        with patch("maxbot.core.agent_loop._retry_api_call", side_effect=lambda fn, **_: fn()), \
+             patch.object(agent, "_save_session", return_value=None), \
+             patch.object(agent, "_detect_repetitive_work", return_value=(False, "")), \
+             patch.object(agent, "_build_memory_context", return_value=""), \
+             patch.object(agent._learning_loop, "on_user_message", return_value=None), \
+             patch.object(agent, "_registry") as registry_mock:
+            registry_mock.call.return_value = '{"total": 2, "results": {}}'
+            result = agent.run("请并行处理两个任务")
+
+        assert result == "并行任务执行完毕"
+        summary = agent.get_runtime_metrics()
+        assert summary["tool_calls"] == 1
+        assert summary["worker_count"] == 2
+
 
 class TestPhase8TraceStore:
     def test_trace_store_persists_latest_task_trace(self, tmp_path: Path):
