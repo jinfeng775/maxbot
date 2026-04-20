@@ -352,3 +352,64 @@ def test_benchmark_registry_lists_named_suite_policy_bundles_and_enriches_bundle
     assert assembly_policy["bundle_name"] == "phase9_release_core"
     assert assembly_policy["bundle_description"] == bundle["description"]
     assert assembly_policy["target_phase"] == "phase9"
+
+
+def test_benchmark_registry_exposes_suite_gate_compatibility_and_recommendation(tmp_path):
+    from maxbot.evals.benchmark_registry import (
+        BenchmarkRegistry,
+        evaluate_suite_gate_compatibility,
+        get_suite_policy_bundle,
+    )
+
+    sample_store = EvalSampleStore(tmp_path / "eval-samples")
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-d1",
+            "task_id": "task-d1",
+            "user_message": "请分析 release program",
+            "final_output": "release program 分析完成",
+            "success": True,
+        },
+        labels=["analysis", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-d2",
+            "task_id": "task-d2",
+            "user_message": "请总结 release status",
+            "final_output": "release status 总结完成",
+            "success": True,
+        },
+        labels=["summary", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+
+    registry = BenchmarkRegistry(tmp_path / "benchmark-suites")
+    suite_id = registry.auto_assemble_suite_from_bundle(
+        suite_name="phase9-quality-program-suite",
+        sample_store=sample_store,
+        bundle_name="phase9_release_core",
+        metadata={"phase": "phase9"},
+    )
+
+    bundle = get_suite_policy_bundle("phase9_release_core")
+    assert bundle["recommended_gate_policy"] == "release_blocker"
+    assert "standard" in bundle["compatible_gate_policies"]
+
+    recommended = evaluate_suite_gate_compatibility(bundle_name="phase9_release_core", gate_policy="release_blocker")
+    assert recommended["compatible"] is True
+    assert recommended["compatibility_level"] == "recommended"
+
+    compatible = evaluate_suite_gate_compatibility(bundle_name="phase9_release_core", gate_policy="standard")
+    assert compatible["compatible"] is True
+    assert compatible["compatibility_level"] == "compatible"
+
+    incompatible = evaluate_suite_gate_compatibility(bundle_name="phase9_release_core", gate_policy="advisory")
+    assert incompatible["compatible"] is False
+    assert incompatible["compatibility_level"] == "incompatible"
+
+    suite = registry.read_suite(suite_id)
+    assembly_policy = suite["metadata"]["assembly_policy"]
+    assert assembly_policy["recommended_gate_policy"] == "release_blocker"
+    assert assembly_policy["compatible_gate_policies"] == bundle["compatible_gate_policies"]

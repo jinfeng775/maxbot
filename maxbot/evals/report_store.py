@@ -6,6 +6,8 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+from maxbot.evals.quality_program import resolve_report_quality_program
+
 
 class ReportStore:
     def __init__(self, base_dir: str | Path):
@@ -46,10 +48,13 @@ class ReportStore:
         new_report = self.read_report(new_report_id)
         old_profile = old_report.get("gate", {}).get("profile") or old_report.get("gate", {}).get("policy_name")
         new_profile = new_report.get("gate", {}).get("profile") or new_report.get("gate", {}).get("policy_name")
+        old_quality_program = resolve_report_quality_program(old_report)
+        new_quality_program = resolve_report_quality_program(new_report)
         rule_summary_delta = self._diff_rule_summary(
             old_report.get("rule_summary") or {},
             new_report.get("rule_summary") or {},
         )
+        quality_program_changed = self._quality_program_changed(old_quality_program, new_quality_program)
         return {
             "old_report_id": old_report_id,
             "new_report_id": new_report_id,
@@ -70,6 +75,9 @@ class ReportStore:
                 "regressed": old_profile == new_profile and old_report.get("gate", {}).get("blocking_reason") is None and bool(new_report.get("gate", {}).get("blocking_reason")),
                 "policy_changed": old_profile != new_profile,
             },
+            "quality_program_changed": quality_program_changed,
+            "latest_quality_program": dict(new_quality_program),
+            "quality_program_transition": self._quality_program_transition(old_quality_program, new_quality_program),
             "latest_weakest_rule": new_report.get("summary", {}).get("weakest_rule"),
             "rule_summary_delta": rule_summary_delta,
             "changed_rules": self._changed_rules(rule_summary_delta),
@@ -95,6 +103,7 @@ class ReportStore:
                     "strongest_rule": None,
                     "changed_rules": [],
                     "release_summary": {},
+                    "quality_program": {},
                 },
             }
 
@@ -125,6 +134,7 @@ class ReportStore:
                 "strongest_rule": self._select_rule_highlight(aggregated_rule_summary, mode="strongest"),
                 "changed_rules": changed_rules,
                 "release_summary": dict(latest.get("gate", {}).get("release_summary") or {}),
+                "quality_program": resolve_report_quality_program(latest),
             },
         }
 
@@ -224,6 +234,30 @@ class ReportStore:
             delta = self._diff_rule_summary(previous.get("rule_summary") or {}, current.get("rule_summary") or {})
             changed.update(self._changed_rules(delta))
         return sorted(changed)
+
+    def _quality_program_changed(self, old_quality_program: dict[str, Any], new_quality_program: dict[str, Any]) -> bool:
+        old_status = old_quality_program.get("status") or "no_bundle_alignment"
+        new_status = new_quality_program.get("status") or "no_bundle_alignment"
+        if old_status == new_status == "no_bundle_alignment":
+            return False
+        return old_quality_program != new_quality_program
+
+    def _quality_program_transition(self, old_quality_program: dict[str, Any], new_quality_program: dict[str, Any]) -> dict[str, Any]:
+        old_status = old_quality_program.get("status") or "no_bundle_alignment"
+        new_status = new_quality_program.get("status") or "no_bundle_alignment"
+        if old_status == new_status == "no_bundle_alignment":
+            return {
+                "from_status": "no_bundle_alignment",
+                "to_status": "no_bundle_alignment",
+                "from_gate_policy": None,
+                "to_gate_policy": None,
+            }
+        return {
+            "from_status": old_quality_program.get("status"),
+            "to_status": new_quality_program.get("status"),
+            "from_gate_policy": old_quality_program.get("active_gate_policy"),
+            "to_gate_policy": new_quality_program.get("active_gate_policy"),
+        }
 
     def _round(self, value: float) -> float:
         return round(value, 10)

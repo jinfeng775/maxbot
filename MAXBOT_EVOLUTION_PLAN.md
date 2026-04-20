@@ -285,7 +285,7 @@ python3 -m pytest \
 - Metrics / trace / evaluation sample 管线
 - Memory / Instinct / Skill promotion policy
 
-**当前状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace/eval sample、promotion policy、benchmark registry / grader / runner / report store、suite enrichment、richer grading policy、quality gate profile / report comparison / trend summary 八条主线已完成最小落地，并已补齐组合式评分、rule-level breakdown、多报告聚合摘要、suite 选择/覆盖摘要、report 运营高亮、suite 自动组装、quality gate 运营摘要，以及 suite/gate policy bundle 基础）
+**当前状态：** ✅ 已完成（Reflection runtime、runtime metrics/trace/eval sample、promotion policy、benchmark registry / grader / runner / report store、suite enrichment、richer grading policy、quality gate profile / report comparison / trend summary、composable grading / rule-level breakdown、多报告聚合摘要、suite 选择/覆盖摘要、report 运营高亮、suite 自动组装、quality gate 运营摘要，以及 suite/gate policy bundle 基础均已封板）
 
 **本阶段首批交付目标：**
 - 工具使用统计
@@ -314,7 +314,7 @@ python3 -m pytest \
 
 ### 9.1 测试套件建设
 
-**当前状态：** 🟡 已进入质量计划运营层第二刀（named gate bundles、release_blocker 运营语义、blocking/report 联动已落地）
+**当前状态：** ✅ 已完成（首批质量计划运营层 bundle / gate / quality program / report linkage 已全部收口）
 
 **当前已落地：**
 - ✅ named quality gate bundles：`strict` / `standard` / `relaxed` / `advisory` / `release_blocker`
@@ -325,11 +325,18 @@ python3 -m pytest \
 - ✅ `BenchmarkRunner` summary 回写 gate 运营字段
 - ✅ `ReportStore.compare_reports()` 输出 `blocking_transition`，并能区分 policy shift 与真实质量回归
 - ✅ `ReportStore.trend_summary()` 输出 latest blocking/advisory/release 摘要
+- ✅ suite bundles 已补齐 `recommended_gate_policy` / `compatible_gate_policies`
+- ✅ `evaluate_suite_gate_compatibility()` 已落地，支持 suite/gate 组合约束与推荐
+- ✅ `BenchmarkRunner` 已输出 `summary.quality_program`，支持 `upgrade_recommended` / `quality_ready` / `release_ready` / `realignment_required` / `blocking_issues_remaining`
+- ✅ `quality_program` 已按持久化 suite metadata 优先解析 gate guidance，避免 live bundle 默认值回灌历史 suite
+- ✅ `ReportStore.compare_reports()` / `trend_summary()` 已补齐 quality program transition 与 latest quality program 摘要，并避免 no-bundle 场景下的伪 transition（含 legacy 报告兼容与 bundle-backed legacy quality program 重建）
+- ✅ Phase 9 定向验证：`python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_benchmark_runner.py tests/test_phase8_report_profiles.py -q` → `39 passed`
+- ✅ Phase 8~9 相关回归：`python3 -m pytest tests/test_phase8_reflection_loop.py tests/test_phase8_reflection_policy.py tests/test_phase8_metrics_pipeline.py tests/test_phase8_trace_store.py tests/test_phase8_eval_sample_store.py tests/test_phase8_eval_sample_config.py tests/test_phase8_benchmark_registry.py tests/test_phase8_grader.py tests/test_phase8_benchmark_runner.py tests/test_phase8_report_profiles.py tests/test_phase8_memory_promotion_policy.py tests/test_phase8_learning_memory_skill_boundary.py tests/test_phase8_skill_distiller.py tests/test_iteration_limit_defaults.py -q` → `78 passed`
 
-**当前优先下一步：**
-1. richer named suite strategy set
-2. suite/gate 组合约束与推荐
-3. 更正式 release-style quality program summary
+**后续若继续：**
+1. 启动 Phase 10 文档和培训
+2. 将 Phase 8~9 能力整理为正式操作文档
+3. 继续处理仓库卫生与历史文档收口
 
 **阶段计划文档：**
 - `docs/phase9-quality-program-plan.md`
@@ -411,6 +418,7 @@ Week 23-24: 持续改进
 **计划状态**: ✅ 第五阶段已完成  
 **计划状态**: ✅ 第六阶段已完成  
 **计划状态**: ✅ 第七阶段已完成  
-**当前阶段**: 🟡 第九阶段推进中 / 质量计划运营层（named gate bundles + `release_blocker` 运营语义 + blocking/report 联动第二刀已落地）  
-**当前计划**: `docs/phase9-quality-program-plan.md`  
-**并行收口**: Phase 1~7 历史审计文档与仓库卫生问题持续清理
+**计划状态**: ✅ 第八阶段已完成  
+**计划状态**: ✅ 第九阶段已完成（按当前用户要求停在第 9 阶段）  
+**当前计划**: 暂停，待后续指令再启动 `docs/phase10-*` 文档  
+**并行收口**: Phase 1~9 文档口径与仓库卫生持续维护

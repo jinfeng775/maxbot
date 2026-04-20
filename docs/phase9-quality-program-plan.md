@@ -163,11 +163,13 @@ python3 -m pytest tests/test_phase8_benchmark_registry.py -q
 ```
 Expected: PASS
 
-**当前收口状态（2026-04-19）**
+**当前收口状态（2026-04-20）**
 - ✅ `get_suite_policy_bundle()` 已支持 richer bundle metadata
 - ✅ `list_suite_policy_bundles()` 已落地
 - ✅ `auto_assemble_suite_from_bundle()` 已回写 `bundle_description` / `target_phase`
-- ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py -q` → `7 passed`
+- ✅ suite bundle 已补齐 `recommended_gate_policy` / `compatible_gate_policies`
+- ✅ `evaluate_suite_gate_compatibility()` 已落地，可返回 `recommended` / `compatible` / `incompatible`
+- ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py -q` → `9 passed`
 
 ---
 
@@ -286,13 +288,21 @@ python3 -m pytest \
 ```
 Expected: PASS
 
-**当前收口状态（2026-04-19，第二刀）**
+**当前收口状态（2026-04-20，第二刀）**
 - ✅ `release_blocker` 已输出 `policy_mode` / `blocking_summary.severity` / `blocking_rule` / `recommended_action`
 - ✅ gate 已输出 `release_summary`（仅在 `release_blocker` 且无阻断原因时标记 `ready=True`）
 - ✅ `BenchmarkRunner` summary 已回写 gate 运营字段
 - ✅ `ReportStore.compare_reports()` 已输出 `blocking_reason_changed` / `blocking_transition`，并区分 policy shift 与真实质量回归
 - ✅ `ReportStore.trend_summary()` 已输出 `latest_blocking_reason` / `latest_advisories` / `summary.release_summary`
-- ✅ RED→GREEN 验证结果：新增两条定向测试已从 `2 failed` 收口到 `2 passed`
+- ✅ 新增 suite/gate 对齐后的 `quality_program` 汇总：支持 `upgrade_recommended` / `quality_ready` / `release_ready` / `realignment_required` / `blocking_issues_remaining` 状态与 `next_action`
+- ✅ `quality_program` 语义已修正为：非 release bundle 在推荐 gate 且通过时进入 `quality_ready`，不再错误落入 `blocking_issues_remaining`
+- ✅ 非推荐但已失败的兼容 gate 会继续保留 `blocking_issues_remaining`，避免被误降级为 `upgrade_recommended`
+- ✅ suite 已优先使用持久化 `assembly_policy` 中的 gate guidance，避免 live bundle 默认值回灌历史 suite
+- ✅ `ReportStore.compare_reports()` / `trend_summary()` 已补齐 quality program transition 与 latest quality program 摘要，并避免 no-bundle 场景下产生伪 transition（含 legacy 报告兼容与 bundle-backed legacy quality program 重建）
+- ✅ 已新增“legacy bundle 元数据不回灌 live gate guidance”回归，避免历史报告被当前 bundle 默认值重写
+- ✅ 已新增“release_ready 不越权外溢到 no-bundle / incompatible suite”回归，避免质量计划状态与 release gate 结果自相矛盾
+- ✅ 已新增“stricter compatible gate 通过时不误报 release_ready”回归，避免 `quality_ready` 与 `release_ready` 同时为真
+- ✅ 定向 RED→GREEN 验证结果：新增 quality program 切片已全部收口（当前 `tests/test_phase8_report_profiles.py -q` → `16 passed`，`tests/test_phase8_benchmark_runner.py -q` → `14 passed`）
 
 ---
 
@@ -327,23 +337,22 @@ python3 -m pytest \
 ### Task D2: Git 提交口径
 
 本轮提交不再继续写成“第八阶段继续增强”。
-建议直接改为：
+在当前收口口径下，建议直接使用：
 
 ```bash
-git commit -m "feat: 启动第九阶段质量计划运营层"
+git commit -m "feat: 完成第九阶段质量计划运营层收口"
 ```
 
-如果本轮仅完成切段与首批 bundle，也可用：
+如果强调 quality program / suite-gate 联动，也可使用：
 
 ```bash
-git commit -m "feat: 完成第九阶段首批策略集与质量门策略入口"
+git commit -m "feat: 完成第九阶段质量计划与报告联动收口"
 ```
 
 ---
 
 ## 6. 结论
 
-从当前节点开始，最重要的不是继续把工作都塞进 Phase 8，
-而是：
+本轮已完成的收口结论是：
 
-> **正式结束 Phase 8 作为“无限扩张基础设施阶段”的状态，并以 Phase 9 的名义推进质量计划运营层。**
+> **Phase 8 已封板，Phase 9 首批质量计划运营层（suite bundle / gate bundle / quality program / report linkage）已完成，并按当前用户要求停止在第 9 阶段。**

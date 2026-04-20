@@ -589,3 +589,278 @@ def test_report_store_separates_policy_shift_from_quality_regression(tmp_path):
     assert reverse["blocking_transition"]["to"] is None
     assert reverse["blocking_transition"]["resolved"] is False
     assert reverse["blocking_transition"]["policy_changed"] is True
+
+
+def test_report_store_tracks_quality_program_transition_and_latest_summary(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.report_store import ReportStore
+
+    suite = {
+        "suite_id": "suite-phase9-quality-program-summary",
+        "suite_name": "phase9-quality-program-summary",
+        "metadata": {
+            "phase": "phase9",
+            "assembly_policy": {
+                "bundle_name": "phase9_release_core",
+                "bundle_description": "Phase 9 发布前核心质量样本集",
+                "target_phase": "phase9",
+                "recommended_gate_policy": "release_blocker",
+                "compatible_gate_policies": ["standard", "release_blocker"],
+            },
+        },
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请输出 release ready",
+                "expected_output": "release ready",
+                "metadata": {"normalize_whitespace": True},
+            },
+            {
+                "task_id": "task-2",
+                "prompt": "请输出 quality locked",
+                "expected_output": "quality locked",
+                "metadata": {"normalize_whitespace": True},
+            },
+        ],
+    }
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    runner = BenchmarkRunner(report_store=store)
+
+    standard_report = runner.run_suite(
+        suite=suite,
+        outputs={"task-1": " release ready ", "task-2": " quality locked "},
+        policy="standard",
+        persist=True,
+    )
+    release_report = runner.run_suite(
+        suite=suite,
+        outputs={"task-1": " release ready ", "task-2": " quality locked "},
+        policy="release_blocker",
+        persist=True,
+    )
+
+    comparison = store.compare_reports(standard_report["report_id"], release_report["report_id"])
+    assert comparison["quality_program_changed"] is True
+    assert comparison["latest_quality_program"]["status"] == "release_ready"
+    assert comparison["quality_program_transition"] == {
+        "from_status": "upgrade_recommended",
+        "to_status": "release_ready",
+        "from_gate_policy": "standard",
+        "to_gate_policy": "release_blocker",
+    }
+
+    trend = store.trend_summary(limit=2)
+    assert trend["summary"]["quality_program"]["status"] == "release_ready"
+    assert trend["summary"]["quality_program"]["recommended_gate_active"] is True
+    assert trend["summary"]["quality_program"]["release_ready"] is True
+
+
+def test_report_store_skips_quality_program_transition_for_no_bundle_alignment(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.report_store import ReportStore
+
+    suite = {
+        "suite_id": "suite-no-bundle-quality-program",
+        "suite_name": "suite-no-bundle-quality-program",
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请输出 no bundle ready",
+                "expected_output": "no bundle ready",
+                "metadata": {"normalize_whitespace": True},
+            }
+        ],
+    }
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    runner = BenchmarkRunner(report_store=store)
+
+    standard_report = runner.run_suite(
+        suite=suite,
+        outputs={"task-1": " no bundle ready "},
+        policy="standard",
+        persist=True,
+    )
+    strict_report = runner.run_suite(
+        suite=suite,
+        outputs={"task-1": " no bundle ready "},
+        policy="strict",
+        persist=True,
+    )
+
+    comparison = store.compare_reports(standard_report["report_id"], strict_report["report_id"])
+    assert comparison["quality_program_changed"] is False
+    assert comparison["quality_program_transition"] == {
+        "from_status": "no_bundle_alignment",
+        "to_status": "no_bundle_alignment",
+        "from_gate_policy": None,
+        "to_gate_policy": None,
+    }
+
+
+def test_report_store_treats_missing_legacy_quality_program_as_no_bundle_alignment(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.report_store import ReportStore
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    legacy_id = store.write_report(
+        {
+            "suite_id": "suite-legacy-no-bundle",
+            "suite_name": "suite-legacy-no-bundle",
+            "pass_rate": 1.0,
+            "avg_score": 1.0,
+            "rule_summary": {},
+            "gate": {"passed": True, "profile": "standard", "blocking_reason": None, "advisories": []},
+            "summary": {},
+            "results": [],
+        }
+    )
+
+    runner = BenchmarkRunner(report_store=store)
+    new_report = runner.run_suite(
+        suite={
+            "suite_id": "suite-legacy-no-bundle",
+            "suite_name": "suite-legacy-no-bundle",
+            "tasks": [
+                {
+                    "task_id": "task-1",
+                    "prompt": "请输出 legacy ready",
+                    "expected_output": "legacy ready",
+                    "metadata": {"normalize_whitespace": True},
+                }
+            ],
+        },
+        outputs={"task-1": " legacy ready "},
+        policy="strict",
+        persist=True,
+    )
+
+    comparison = store.compare_reports(legacy_id, new_report["report_id"])
+    assert comparison["quality_program_changed"] is False
+    assert comparison["quality_program_transition"] == {
+        "from_status": "no_bundle_alignment",
+        "to_status": "no_bundle_alignment",
+        "from_gate_policy": None,
+        "to_gate_policy": None,
+    }
+
+
+
+def test_report_store_reconstructs_bundle_backed_legacy_quality_program(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.report_store import ReportStore
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    legacy_id = store.write_report(
+        {
+            "suite_id": "suite-legacy-phase9-bundle",
+            "suite_name": "suite-legacy-phase9-bundle",
+            "pass_rate": 1.0,
+            "avg_score": 1.0,
+            "rule_summary": {},
+            "gate": {
+                "passed": True,
+                "profile": "standard",
+                "blocking_reason": None,
+                "advisories": [],
+                "release_summary": {"is_release_blocker": False, "ready": False},
+            },
+            "summary": {
+                "suite_metadata": {
+                    "phase": "phase9",
+                    "assembly_policy": {
+                        "bundle_name": "phase9_release_core",
+                        "bundle_description": "Frozen Phase 9 发布前核心质量样本集",
+                        "target_phase": "phase9",
+                        "recommended_gate_policy": "standard",
+                        "compatible_gate_policies": ["standard"],
+                    }
+                }
+            },
+            "results": [],
+        }
+    )
+
+    runner = BenchmarkRunner(report_store=store)
+    new_report = runner.run_suite(
+        suite={
+            "suite_id": "suite-legacy-phase9-bundle",
+            "suite_name": "suite-legacy-phase9-bundle",
+            "metadata": {
+                "phase": "phase9",
+                "assembly_policy": {
+                    "bundle_name": "phase9_release_core",
+                    "bundle_description": "Frozen Phase 9 发布前核心质量样本集",
+                    "target_phase": "phase9",
+                    "recommended_gate_policy": "standard",
+                    "compatible_gate_policies": ["standard"],
+                },
+            },
+            "tasks": [
+                {
+                    "task_id": "task-1",
+                    "prompt": "请输出 legacy bundle ready",
+                    "expected_output": "legacy bundle ready",
+                    "metadata": {"normalize_whitespace": True},
+                }
+            ],
+        },
+        outputs={"task-1": " legacy bundle ready "},
+        policy="standard",
+        persist=True,
+    )
+
+    comparison = store.compare_reports(legacy_id, new_report["report_id"])
+    assert comparison["quality_program_changed"] is False
+    assert comparison["quality_program_transition"] == {
+        "from_status": "quality_ready",
+        "to_status": "quality_ready",
+        "from_gate_policy": "standard",
+        "to_gate_policy": "standard",
+    }
+
+    trend = store.trend_summary(limit=2)
+    assert trend["summary"]["quality_program"]["status"] == "quality_ready"
+    assert trend["summary"]["quality_program"]["recommended_gate_policy"] == "standard"
+
+
+def test_report_store_does_not_backfill_live_gate_guidance_for_legacy_bundle_metadata(tmp_path):
+    from maxbot.evals.quality_program import resolve_report_quality_program
+    from maxbot.evals.report_store import ReportStore
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    legacy_id = store.write_report(
+        {
+            "suite_id": "suite-legacy-phase9-incomplete-guidance",
+            "suite_name": "suite-legacy-phase9-incomplete-guidance",
+            "pass_rate": 1.0,
+            "avg_score": 1.0,
+            "rule_summary": {},
+            "gate": {
+                "passed": True,
+                "profile": "standard",
+                "blocking_reason": None,
+                "advisories": [],
+                "release_summary": {"is_release_blocker": False, "ready": False},
+            },
+            "summary": {
+                "suite_metadata": {
+                    "phase": "phase9",
+                    "assembly_policy": {
+                        "bundle_name": "phase9_release_core",
+                        "bundle_description": "Legacy Phase 9 发布前核心质量样本集",
+                        "target_phase": "phase9",
+                        "compatible_gate_policies": ["standard", "release_blocker"],
+                    }
+                }
+            },
+            "results": [],
+        }
+    )
+
+    quality_program = resolve_report_quality_program(store.read_report(legacy_id))
+    assert quality_program["bundle_name"] == "phase9_release_core"
+    assert quality_program["recommended_gate_policy"] is None
+    assert quality_program["compatible_gate_policies"] == ["standard", "release_blocker"]
+    assert quality_program["status"] == "no_bundle_alignment"

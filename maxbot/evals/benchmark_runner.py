@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Any, Callable
 
 from maxbot.evals.grader import BenchmarkGrader, evaluate_benchmark_quality_gate
+from maxbot.evals.quality_program import build_quality_program_summary
 from maxbot.evals.report_store import ReportStore
 
 
@@ -68,6 +69,7 @@ class BenchmarkRunner:
 
     def _build_report_summary(self, *, suite: dict[str, Any], graded: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
         rule_summary = graded.get("rule_summary") or {}
+        quality_program = self._build_quality_program_summary(suite=suite, gate=gate)
         return {
             "suite_metadata": dict(suite.get("metadata") or {}),
             "coverage_summary": {
@@ -84,7 +86,11 @@ class BenchmarkRunner:
                 "advisories": list(gate.get("advisories") or []),
                 "release_summary": dict(gate.get("release_summary") or {}),
             },
+            "quality_program": quality_program,
         }
+
+    def _build_quality_program_summary(self, *, suite: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
+        return build_quality_program_summary(suite_metadata=suite.get("metadata") or {}, gate=gate)
 
     def _select_rule_highlight(self, rule_summary: dict[str, dict[str, Any]], *, mode: str) -> dict[str, Any] | None:
         if not rule_summary:

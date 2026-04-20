@@ -16,6 +16,8 @@ _SUITE_POLICY_BUNDLES: dict[str, dict[str, Any]] = {
         "name": "phase8_core",
         "description": "Phase 8 基础能力混合样本集：analysis + summary，聚焦 runtime 质量基础设施。",
         "target_phase": "phase8",
+        "recommended_gate_policy": "standard",
+        "compatible_gate_policies": ["relaxed", "standard", "strict"],
         "selection_policies": [
             {"labels": ["analysis", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
             {"labels": ["summary", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
@@ -25,6 +27,8 @@ _SUITE_POLICY_BUNDLES: dict[str, dict[str, Any]] = {
         "name": "phase8_runtime_mix",
         "description": "Phase 8 runtime 样本混合集：更偏向 runtime/source=runtime 的 analysis/summary。",
         "target_phase": "phase8",
+        "recommended_gate_policy": "standard",
+        "compatible_gate_policies": ["standard", "strict"],
         "selection_policies": [
             {"labels": ["analysis"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 2},
             {"labels": ["summary"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
@@ -34,6 +38,8 @@ _SUITE_POLICY_BUNDLES: dict[str, dict[str, Any]] = {
         "name": "phase9_release_core",
         "description": "Phase 9 发布前核心质量样本集：analysis + summary + runtime source。",
         "target_phase": "phase9",
+        "recommended_gate_policy": "release_blocker",
+        "compatible_gate_policies": ["standard", "release_blocker"],
         "selection_policies": [
             {"labels": ["analysis"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
             {"labels": ["summary"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
@@ -50,6 +56,27 @@ def get_suite_policy_bundle(name: str) -> dict[str, Any]:
 
 def list_suite_policy_bundles() -> list[str]:
     return sorted(_SUITE_POLICY_BUNDLES)
+
+
+def evaluate_suite_gate_compatibility(*, bundle_name: str, gate_policy: str | None) -> dict[str, Any]:
+    bundle = get_suite_policy_bundle(bundle_name)
+    recommended_gate_policy = bundle.get("recommended_gate_policy")
+    compatible_gate_policies = list(bundle.get("compatible_gate_policies") or [])
+    active_gate_policy = gate_policy or recommended_gate_policy
+    compatible = bool(active_gate_policy) and active_gate_policy in compatible_gate_policies
+    compatibility_level = "incompatible"
+    if compatible:
+        compatibility_level = "recommended" if active_gate_policy == recommended_gate_policy else "compatible"
+    return {
+        "bundle_name": bundle_name,
+        "target_phase": bundle.get("target_phase"),
+        "active_gate_policy": active_gate_policy,
+        "recommended_gate_policy": recommended_gate_policy,
+        "compatible_gate_policies": compatible_gate_policies,
+        "recommended_gate_active": active_gate_policy == recommended_gate_policy,
+        "compatible": compatible,
+        "compatibility_level": compatibility_level,
+    }
 
 
 class BenchmarkRegistry:
@@ -133,6 +160,8 @@ class BenchmarkRegistry:
         bundle_name: str | None = None,
         bundle_description: str | None = None,
         target_phase: str | None = None,
+        recommended_gate_policy: str | None = None,
+        compatible_gate_policies: list[str] | None = None,
     ) -> str:
         ordered_samples: list[dict[str, Any]] = []
         seen_task_ids: set[str] = set()
@@ -171,6 +200,10 @@ class BenchmarkRegistry:
             merged_metadata["assembly_policy"]["bundle_description"] = bundle_description
         if target_phase:
             merged_metadata["assembly_policy"]["target_phase"] = target_phase
+        if recommended_gate_policy:
+            merged_metadata["assembly_policy"]["recommended_gate_policy"] = recommended_gate_policy
+        if compatible_gate_policies:
+            merged_metadata["assembly_policy"]["compatible_gate_policies"] = list(compatible_gate_policies)
         merged_metadata["coverage_summary"] = self._build_coverage_summary(ordered_samples)
         merged_metadata["source_sample_count"] = len(tasks)
         return self.register_suite(
@@ -197,6 +230,8 @@ class BenchmarkRegistry:
             bundle_name=bundle_name,
             bundle_description=bundle["description"],
             target_phase=bundle["target_phase"],
+            recommended_gate_policy=bundle.get("recommended_gate_policy"),
+            compatible_gate_policies=bundle.get("compatible_gate_policies"),
         )
 
     def read_suite(self, suite_id: str) -> dict[str, Any]:
