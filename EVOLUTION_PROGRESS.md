@@ -1,8 +1,8 @@
 # MaxBot 进化计划进度追踪
 
 **最后更新：** 2026-04-19  
-**当前阶段：** Phase 1~7 主线已完成，Phase 8 第一轮基础设施已落地并进入实施中  
-**整体进度：** 约 60%（7/12 个阶段已完成，Phase 8 约 20%）
+**当前阶段：** Phase 1~7 主线已完成，Phase 8 已完成 suite selection / report highlights 在内的十个核心切片并持续实施中  
+**整体进度：** 约 72%（7/12 个阶段已完成，Phase 8 约 68%）
 
 ---
 
@@ -16,7 +16,7 @@ Phase 4:  ████████████████████ 100% ✅ 
 Phase 5:  ████████████████████ 100% ✅ 安全扫描主链/质量门/工具入口已收口
 Phase 6:  ████████████████████ 100% ✅ runtime 主链/legacy 兼容层/工具契约已收口
 Phase 7:  ████████████████████ 100% ✅ compact hooks / profile / 阻断路径已收口
-Phase 8:  ████░░░░░░░░░░░░░░░░  20% 🟡 实施中
+Phase 8:  █████████████░░░░░░░  68% 🟡 实施中
 Phase 9:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 10: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 11: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
@@ -332,9 +332,9 @@ python3 -m pytest \
 - 阶段验证：`python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 
 ### 第八阶段：监控和分析
-- **状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 三条主线已完成第一轮最小落地，并开始补齐第二轮结构化指标与 reflection 策略细化）
-- 现状：已明确将 Phase 8 定义为“部署态进化基础设施阶段”，首批三条主线为 reflection runtime、metrics/trace/eval sample、memory/instinct/skill promotion policy
-- 当前已完成：`maxbot/reflection/*`、`maxbot/evals/*`、`maxbot/learning/promotion_policy.py`、`maxbot/knowledge/skill_distiller.py`、AgentConfig / YAML / config_loader 的 reflection + metrics 配置接入、`tests/test_phase8_reflection_policy.py` + `tests/test_phase8_reflection_loop.py`（`10 passed`，已补 wildcard task type、revision-limit stopped_reason）、`tests/test_phase8_metrics_pipeline.py` + `tests/test_phase8_trace_store.py`（`7 passed`，已补 memory hit/miss、instinct matches、parallel worker count、latest trace 读取）、`tests/test_phase8_memory_promotion_policy.py` / `tests/test_phase8_learning_memory_skill_boundary.py` / `tests/test_phase8_skill_distiller.py`（合计 `7 passed`）
+- **状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace/eval sample、promotion policy、benchmark registry / grader / runner / report store、suite enrichment、richer grading policy、quality gate profile / report comparison / trend summary、composable grading / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights 十条主线已完成最小落地，并继续向更正式的质量门运营层推进）
+- 现状：已明确将 Phase 8 定义为“部署态进化基础设施阶段”，当前十条主线为 reflection runtime、metrics/trace、eval sample、memory/instinct/skill promotion policy、benchmark registry / grader groundwork、benchmark runner / report store / runtime quality gate integration、suite enrichment / richer grader policy / quality gate closure、quality gate profile / report comparison / trend summary、composable grading policy / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights
+- 当前已完成：`maxbot/reflection/*`、`maxbot/evals/*`（含 `metrics.py`、`trace_store.py`、`sample_store.py`、`benchmark_registry.py`、`grader.py`、`benchmark_runner.py`、`report_store.py`）、`maxbot/learning/promotion_policy.py`、`maxbot/knowledge/skill_distiller.py`、AgentConfig / YAML / config_loader 的 reflection + metrics + eval sample 配置接入、`tests/test_phase8_reflection_policy.py` + `tests/test_phase8_reflection_loop.py`（`10 passed`）、`tests/test_phase8_metrics_pipeline.py` + `tests/test_phase8_trace_store.py`（`7 passed`）、`tests/test_phase8_eval_sample_store.py` + `tests/test_phase8_eval_sample_config.py` + eval sample 导出专项（`6 passed`）、`tests/test_phase8_benchmark_registry.py` / `tests/test_phase8_grader.py` / `tests/test_phase8_benchmark_runner.py`（合计 `17 passed`，已覆盖 suite selection policy / coverage summary / report summary 高亮）、`tests/test_phase8_report_profiles.py`（已扩至 `6 passed`，含 report diff、trend summary、latest profile、多报告 rule summary 聚合与 changed rules）以及 Phase 8 promotion 测试（`7 passed`）
 - 计划文档：`docs/phase8-reflection-memory-plan.md`
 
 ### 第九阶段：测试和质量保证
@@ -377,9 +377,16 @@ python3 -m pytest \
 ### P0：继续推进 Phase 8 部署态进化基础设施
 
 1. ✅ Reflection runtime 第一轮已落地（`tests/test_phase8_reflection_loop.py` → `7 passed`）
-2. ✅ runtime metrics / trace 第一轮已落地（`tests/test_phase8_metrics_pipeline.py` → `3 passed`）
-3. ✅ memory / instinct / skill promotion policy 最小闭环已落地（Phase 8 promotion 测试合计 `7 passed`）
-4. 继续以 `docs/phase8-reflection-memory-plan.md` 为执行计划，向 Phase 9 的 grader / quality gate 与后续 harness optimization 打基础
+2. ✅ runtime metrics / trace 第一轮已落地（`tests/test_phase8_metrics_pipeline.py` + `tests/test_phase8_trace_store.py` → `7 passed`）
+3. ✅ eval sample store / benchmark seed 基础已落地（`tests/test_phase8_eval_sample_store.py` + `tests/test_phase8_eval_sample_config.py` + eval sample 导出专项 → `6 passed`）
+4. ✅ benchmark registry / grader groundwork 已落地（历史基础已完成，现已扩成 richer policy）
+5. ✅ benchmark runner / report store / runtime quality gate integration 已落地（`tests/test_phase8_benchmark_runner.py` → `5 passed`）
+6. ✅ suite enrichment / richer grader policy / quality gate closure 已补齐（`tests/test_phase8_benchmark_registry.py` / `tests/test_phase8_grader.py` / `tests/test_phase8_benchmark_runner.py` 合计 `13 passed`）
+7. ✅ quality gate profile / report comparison / trend summary 已补齐（`tests/test_phase8_report_profiles.py` → `4 passed`）
+8. ✅ memory / instinct / skill promotion policy 最小闭环已落地（Phase 8 promotion 测试合计 `7 passed`）
+9. ✅ composable grading policy / rule-level breakdown / multi-report aggregation 已补齐（`tests/test_phase8_grader.py` + `tests/test_phase8_report_profiles.py` 新增切片已收口）
+10. ✅ suite selection policy / coverage summary / report-level operational highlights 已补齐（`tests/test_phase8_benchmark_registry.py` + `tests/test_phase8_report_profiles.py` 新增切片已收口）
+11. 继续以 `docs/phase8-reflection-memory-plan.md` 为执行计划，向 Phase 9 的 suite 自动组装与更正式 quality gate 运营策略推进
 
 ### P1：继续收口历史文档与仓库卫生
 
@@ -417,6 +424,10 @@ python3 -m pytest \
 - `python3 -m pytest tests/test_phase5_security_review_system.py tests/test_phase5_security_pipeline.py tests/test_phase5_quality_gate.py tests/test_phase5_security_tool.py -q` → `11 passed`
 - `python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 - Phase 4~7 宽回归切片 → `135 passed`
+- Phase 8 reflection / metrics / trace / eval sample / promotion 回归切片 + config defaults → `32 passed`
+- Phase 8 benchmark registry / grader groundwork + richer grading policy / suite enrichment → `13 passed`
+- Phase 8 benchmark runner / report store / executor fail-closed + report summary highlights → `17 passed`
+- Phase 8 quality gate profiles / report comparison / trend summary + composable grading / rule breakdown / multi-report aggregation + suite selection policy → `11 passed`
 
 ### 相关文档
 
@@ -430,5 +441,5 @@ python3 -m pytest \
 
 **进度更新：** ✅ 已更新  
 **最后更新：** 2026-04-19  
-**当前状态：** ✅ Phase 1~7 主线可按已完成追踪；🟡 Phase 8 第一轮基础设施已落地并进入实施中；历史 Phase 1~7 文档口径已完成第一轮收口  
-**当前回答：** 本轮已完成 fresh audit 文档第一轮收口，并补齐 Phase 1 缺件引用、Phase 2 默认运行时技能接入、Phase 4 MemPalace `mine` 子项与 Phase 7 hook audit 改写；下一步是继续清理 tracked `.pyc` / `__pycache__` 与推进 Phase 8 后续实现。
+**当前状态：** ✅ Phase 1~7 主线可按已完成追踪；🟡 Phase 8 已完成 reflection、metrics/trace、eval sample、benchmark/grader/runner/report store、suite enrichment / richer grading policy、quality gate profile / report comparison / trend summary、composable grading / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights、promotion policy 十个基础切片并继续实施中；历史 Phase 1~7 文档口径已完成第一轮收口  
+**当前回答：** 本轮继续推进了 Phase 8：已补齐 suite selection policy、coverage summary、suite metadata 过滤 task set、report summary 的 weakest/strongest rule 高亮，以及 compare/trend 的 changed rules 摘要；下一步应继续做 suite 自动组装策略与更正式的 quality gate 运营模式。

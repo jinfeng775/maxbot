@@ -21,6 +21,8 @@ class TestPhase8MetricsPipeline:
             reflection_task_types=["default"],
             metrics_enabled=True,
             trace_store_dir=str(tmp_path / "traces"),
+            eval_samples_enabled=True,
+            eval_sample_store_dir=str(tmp_path / "eval-samples"),
         )
 
         with patch.object(Agent, "_init_client", return_value=client_mock):
@@ -173,6 +175,42 @@ class TestPhase8MetricsPipeline:
         summary = agent.get_runtime_metrics()
         assert summary["tool_calls"] == 1
         assert summary["worker_count"] == 2
+
+    def test_agent_exports_successful_trace_to_eval_sample_store(self, tmp_path: Path):
+        message = SimpleNamespace(content="这是一个可以导出评测样本的答案", tool_calls=None)
+        response = SimpleNamespace(choices=[SimpleNamespace(message=message)])
+
+        client = MagicMock()
+        client.chat.completions.create.return_value = response
+
+        agent = self._make_agent(client, tmp_path)
+
+        with patch("maxbot.core.agent_loop._retry_api_call", side_effect=lambda fn, **_: fn()), \
+             patch.object(agent, "_save_session", return_value=None), \
+             patch.object(agent, "_build_memory_context", return_value=""), \
+             patch.object(agent._learning_loop, "on_user_message", return_value=None), \
+             patch.object(agent, "_apply_reflection", return_value=SimpleNamespace(
+                 final_output="修订后的评测答案",
+                 revision_count=1,
+                 reflection_applied=True,
+                 critiques=[{"feedback": "请补充约束", "revise": True}],
+             )):
+            result = agent.run("请给出可导出的答案")
+
+        assert result == "修订后的评测答案"
+        latest_trace = agent._trace_store.latest()
+        latest_sample = agent._eval_sample_store.latest()
+
+        assert latest_sample is not None
+        assert latest_sample["trace_id"] == latest_trace["trace_id"]
+        assert latest_sample["prompt"] == "请给出可导出的答案"
+        assert latest_sample["response"] == "修订后的评测答案"
+        assert latest_sample["metadata"]["reflection_count"] == 1
+        assert latest_sample["metadata"]["tool_calls"] == 0
+
+        benchmark_tasks = agent._eval_sample_store.build_benchmark_tasks(limit=1)
+        assert benchmark_tasks[0]["prompt"] == "请给出可导出的答案"
+        assert benchmark_tasks[0]["expected_output"] == "修订后的评测答案"
 
 
 class TestPhase8TraceStore:

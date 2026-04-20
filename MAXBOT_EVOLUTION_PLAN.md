@@ -285,7 +285,7 @@ python3 -m pytest \
 - Metrics / trace / evaluation sample 管线
 - Memory / Instinct / Skill promotion policy
 
-**当前状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace、promotion policy 已完成第一轮最小落地，并开始补齐第二轮结构化指标与 reflection 策略细化）
+**当前状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace/eval sample、promotion policy、benchmark registry / grader / runner / report store、suite enrichment、richer grading policy、quality gate profile / report comparison / trend summary 八条主线已完成最小落地，并已补齐组合式评分、rule-level breakdown、多报告聚合摘要以及 suite 选择/覆盖摘要与 report 运营高亮）
 
 **本阶段首批交付目标：**
 - 工具使用统计
@@ -295,6 +295,13 @@ python3 -m pytest \
 - Reflection 策略与 revise 闭环
 - 结构化 trace / metrics 存储
 - 长期知识升级规则（memory / instinct / skill）
+- eval sample 样本库与 benchmark seed 输出
+- benchmark registry / grader groundwork
+- benchmark runner / report store / runtime quality gate integration
+- richer grader policy / suite enrichment / quality gate closure
+- quality gate profile / report comparison / trend summary
+- composable grading policy / rule-level breakdown / multi-report aggregation
+- suite selection policy / coverage summary / report-level operational highlights
 
 **阶段计划文档：**
 - `docs/phase8-reflection-memory-plan.md`
@@ -387,6 +394,6 @@ Week 23-24: 持续改进
 **计划状态**: ✅ 第五阶段已完成  
 **计划状态**: ✅ 第六阶段已完成  
 **计划状态**: ✅ 第七阶段已完成  
-**当前阶段**: 🟡 第八阶段实施中 / 部署态进化基础设施（Reflection runtime + metrics/trace + promotion policy 第一轮已落地）  
+**当前阶段**: 🟡 第八阶段实施中 / 部署态进化基础设施（Reflection runtime + metrics/trace/eval sample + promotion policy + benchmark/grader/runner/report store + profile/comparison/trend + composable grading/breakdown/aggregation + suite selection/report highlights 已连续落地）  
 **当前计划**: `docs/phase8-reflection-memory-plan.md`  
 **并行收口**: Phase 1~7 历史审计文档与仓库卫生问题持续清理

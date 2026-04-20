@@ -91,6 +91,12 @@ session:
   # trace 存储目录（null = ~/.maxbot/traces）
   trace_store_dir: null
 
+  # 是否把成功任务导出为评测样本
+  eval_samples_enabled: false
+
+  # 评测样本目录（null = ~/.maxbot/eval_samples）
+  eval_sample_store_dir: null
+
 # ==================== 技能配置 ====================
 skills:
   # 技能存储目录

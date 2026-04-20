@@ -72,6 +72,8 @@ class SessionConfig:
     reflection_fail_closed: bool = False
     metrics_enabled: bool = True
     trace_store_dir: str | None = None
+    eval_samples_enabled: bool = False
+    eval_sample_store_dir: str | None = None
 
 
 @dataclass
@@ -317,6 +319,8 @@ class ConfigLoader:
             "MAXBOT_REFLECTION_FAIL_CLOSED": ("session", "reflection_fail_closed"),
             "MAXBOT_METRICS_ENABLED": ("session", "metrics_enabled"),
             "MAXBOT_TRACE_STORE_DIR": ("session", "trace_store_dir"),
+            "MAXBOT_EVAL_SAMPLES_ENABLED": ("session", "eval_samples_enabled"),
+            "MAXBOT_EVAL_SAMPLE_STORE_DIR": ("session", "eval_sample_store_dir"),
             "MAXBOT_SESSION_ID": ("session", "session_id"),
             "MAXBOT_MAX_CONVERSATION_TURNS": ("session", "max_conversation_turns"),
             "MAXBOT_SKILLS_DIR": ("skills", "skills_dir"),

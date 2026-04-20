@@ -34,7 +34,7 @@ from maxbot.core.hooks import HookManager, BUILTIN_HOOKS, HookContext, HookEvent
 from maxbot.learning import LearningLoop
 from maxbot.memory import MemPalaceAdapter
 from maxbot.reflection import ReflectionCritic, ReflectionLoop, ReflectionPolicy
-from maxbot.evals import RuntimeMetrics, RuntimeMetricsCollector, TraceStore
+from maxbot.evals import RuntimeMetrics, RuntimeMetricsCollector, TraceStore, EvalSampleStore
 
 # 获取 Agent 日志器
 logger = get_logger("agent")
@@ -84,6 +84,8 @@ class AgentConfig:
     reflection_fail_closed: bool | None = None
     metrics_enabled: bool | None = None
     trace_store_dir: str | None = None
+    eval_samples_enabled: bool | None = None
+    eval_sample_store_dir: str | None = None
     session_id: str | None = None
     session_store: Any | None = None
     auto_save: bool | None = None
@@ -134,6 +136,8 @@ class AgentConfig:
             ("session", "reflection_fail_closed", "reflection_fail_closed"),
             ("session", "metrics_enabled", "metrics_enabled"),
             ("session", "trace_store_dir", "trace_store_dir"),
+            ("session", "eval_samples_enabled", "eval_samples_enabled"),
+            ("session", "eval_sample_store_dir", "eval_sample_store_dir"),
             ("session", "session_id", "session_id"),
             ("session", "auto_save", "auto_save"),
             ("session", "max_conversation_turns", "max_conversation_turns"),
@@ -184,6 +188,8 @@ class AgentConfig:
             "reflection_fail_closed": False,
             "metrics_enabled": True,
             "trace_store_dir": None,
+            "eval_samples_enabled": False,
+            "eval_sample_store_dir": None,
             "auto_save": True,
             "max_conversation_turns": 140,
         }
@@ -409,6 +415,8 @@ class Agent:
         self._runtime_metrics = RuntimeMetricsCollector()
         trace_dir = self.config.trace_store_dir or (Path.home() / ".maxbot" / "traces")
         self._trace_store = TraceStore(trace_dir)
+        sample_dir = self.config.eval_sample_store_dir or (Path.home() / ".maxbot" / "eval_samples")
+        self._eval_sample_store = EvalSampleStore(sample_dir)
         self._active_run_depth = 0
         self._active_run_start: float | None = None
         self._active_root_user_message: str | None = None
@@ -1091,9 +1099,9 @@ class Agent:
         memory_misses: int = 0,
         instinct_matches: int = 0,
         worker_count: int = 0,
-    ) -> None:
+    ) -> dict[str, Any] | None:
         if not self.config.metrics_enabled:
-            return
+            return None
 
         revision_count = 0
         reflection_count = 0
@@ -1117,23 +1125,24 @@ class Agent:
             elapsed=elapsed,
         )
         self._runtime_metrics.add(metrics)
-        self._trace_store.write_trace(
-            {
-                "task_id": task_id,
-                "session_id": self.config.session_id,
-                "user_message": user_message,
-                "final_output": final_output,
-                "tool_calls": tool_calls,
-                "revision_count": revision_count,
-                "reflection_count": reflection_count,
-                "memory_hits": memory_hits,
-                "memory_misses": memory_misses,
-                "instinct_matches": instinct_matches,
-                "worker_count": worker_count,
-                "elapsed": elapsed,
-                "success": success,
-            }
-        )
+        trace_payload = {
+            "task_id": task_id,
+            "session_id": self.config.session_id,
+            "user_message": user_message,
+            "final_output": final_output,
+            "tool_calls": tool_calls,
+            "revision_count": revision_count,
+            "reflection_count": reflection_count,
+            "memory_hits": memory_hits,
+            "memory_misses": memory_misses,
+            "instinct_matches": instinct_matches,
+            "worker_count": worker_count,
+            "elapsed": elapsed,
+            "success": success,
+        }
+        trace_id = self._trace_store.write_trace(trace_payload)
+        trace_payload["trace_id"] = trace_id
+        return trace_payload
 
     def get_runtime_metrics(self) -> dict[str, Any]:
         return self._runtime_metrics.summary()
@@ -1324,7 +1333,7 @@ class Agent:
             instinct_matches = self._last_instinct_match_count
             worker_count = self._active_run_worker_count
 
-            self._record_runtime_metrics(
+            trace_payload = self._record_runtime_metrics(
                 user_message=self._active_root_user_message or user_message,
                 final_output=final_output,
                 tool_calls=self._active_run_tool_calls,
@@ -1336,6 +1345,12 @@ class Agent:
                 instinct_matches=instinct_matches,
                 worker_count=worker_count,
             )
+            if self.config.eval_samples_enabled and trace_payload is not None:
+                self._eval_sample_store.promote_trace(
+                    trace_payload,
+                    labels=["phase8", "runtime"],
+                    metadata={"source": "agent_run"},
+                )
 
             logger.debug(f"对话完成，返回响应: {len(final_output)} 字符")
             return final_output

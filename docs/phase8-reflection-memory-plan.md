@@ -212,6 +212,423 @@ Expected: PASS
 - ✅ `TraceStore.latest()` 已补齐，最近一次 trace 读取路径已具备专项回归
 - ✅ 当前专项结果：`tests/test_phase8_metrics_pipeline.py tests/test_phase8_trace_store.py -q` → `7 passed`
 
+### Task B3: 补齐 eval sample registry 与 benchmark seed 基础
+
+**Objective:** 把 Phase 8 标题中的 `eval sample` 从概念补到代码，基于已落地的 trace 输出可复用评测样本，为 Phase 9 grader / quality gate 提供输入地基。
+
+**Files:**
+- Create: `maxbot/evals/sample_store.py`
+- Create: `tests/test_phase8_eval_sample_store.py`
+- Create: `tests/test_phase8_eval_sample_config.py`
+- Modify: `maxbot/evals/__init__.py`
+- Modify: `maxbot/core/agent_loop.py`
+- Modify: `maxbot/config/default_config.yaml`
+- Modify: `maxbot/config/config_loader.py`
+- Modify: `tests/test_phase8_metrics_pipeline.py`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `EvalSampleStore.promote_trace()` 可把 trace 升级为 eval sample
+- `EvalSampleStore.latest()` / `list_recent()` 顺序稳定
+- `build_benchmark_tasks()` 可输出后续 grader / harness 可消费的任务种子
+- `Agent.run()` 在启用 eval sample 导出时会把成功任务写入样本库
+- `AgentConfig` / `ConfigLoader` / YAML 默认值对齐
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_eval_sample_store.py \
+  tests/test_phase8_eval_sample_config.py \
+  tests/test_phase8_metrics_pipeline.py::TestPhase8MetricsPipeline::test_agent_exports_successful_trace_to_eval_sample_store -q
+```
+Expected: FAIL — `sample_store` / 新配置字段 / runtime 导出链路尚未实现
+
+**Step 3: Implement minimal export path**
+- 基于 `TraceStore.write_trace()` 的结果生成 eval sample
+- 为 sample 保留 `prompt / response / trace_id / labels / metadata`
+- 先使用文件目录存储，不引入数据库或复杂索引
+- benchmark seed 先输出轻量 `prompt + expected_output + metadata`
+
+**Step 4: Wire into runtime/config**
+- 新增 `eval_samples_enabled` 与 `eval_sample_store_dir`
+- 同步 `AgentConfig`、`SessionConfig`、默认 YAML 与环境变量映射
+- 仅在成功任务结束时导出 eval sample，避免把异常中间态噪音写入样本库
+
+**Step 5: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_eval_sample_store.py \
+  tests/test_phase8_eval_sample_config.py \
+  tests/test_phase8_metrics_pipeline.py::TestPhase8MetricsPipeline::test_agent_exports_successful_trace_to_eval_sample_store -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `maxbot/evals/sample_store.py` 已落地
+- ✅ trace → eval sample 导出链路已接入 `agent_loop.py`
+- ✅ `eval_samples_enabled` / `eval_sample_store_dir` 默认值、加载链路与环境变量映射已补齐
+- ✅ 当前专项结果：新增 eval sample slice → `6 passed`
+
+### Task B4: 落 benchmark registry / grader groundwork
+
+**Objective:** 基于已落地的 eval sample，补齐 Phase 9 前置地基：可复用 benchmark suite 注册、最小 grader、以及可执行的 benchmark quality gate。
+
+**Files:**
+- Create: `maxbot/evals/benchmark_registry.py`
+- Create: `maxbot/evals/grader.py`
+- Create: `tests/test_phase8_benchmark_registry.py`
+- Create: `tests/test_phase8_grader.py`
+- Modify: `maxbot/evals/__init__.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `BenchmarkRegistry.register_from_eval_samples()` 可把 eval sample 落成 suite
+- `BenchmarkRegistry.latest()` / `list_suites()` 顺序稳定
+- `build_task_set()` 可产出 `harness_optimizer` 可消费的 benchmark task 列表
+- `BenchmarkGrader.grade_task()` 支持 exact match 与 keyword coverage 两类最小评分
+- `BenchmarkGrader.grade_suite()` 可汇总平均分 / 通过率
+- `evaluate_benchmark_quality_gate()` 可按 pass rate / avg score fail-closed
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_benchmark_registry.py \
+  tests/test_phase8_grader.py -q
+```
+Expected: FAIL — `benchmark_registry` / `grader` 尚不存在
+
+**Step 3: Implement minimal benchmark suite registry**
+- 先用 JSON 文件存储 suite，不引入数据库
+- suite 至少保留：`suite_id` / `suite_name` / `source` / `tasks` / `metadata`
+- 与 `EvalSampleStore.build_benchmark_tasks()` 对接，直接复用样本输出
+
+**Step 4: Implement minimal grader and gate**
+- `grade_task()` 第一版支持：
+  - exact match
+  - required keyword coverage
+- `grade_suite()` 输出：
+  - `tasks_total`
+  - `passed_count`
+  - `pass_rate`
+  - `avg_score`
+  - `results`
+- `evaluate_benchmark_quality_gate()` 第一版按：
+  - `min_pass_rate`
+  - `min_avg_score`
+  做 fail-closed
+
+**Step 5: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_benchmark_registry.py \
+  tests/test_phase8_grader.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `maxbot/evals/benchmark_registry.py` / `maxbot/evals/grader.py` 已落地
+- ✅ benchmark suite 注册、task set 输出、最小 grader 与 benchmark quality gate 已补齐
+- ✅ 当前专项结果：benchmark/grader slice → `4 passed`
+
+### Task B5: 补 benchmark runner / report store / runtime quality gate integration
+
+**Objective:** 把 Phase 8 的 benchmark registry + grader 从“静态工具”推进到“可执行闭环”，形成 suite 执行、结果持久化、quality gate 结果收口的最小主线。
+
+**Files:**
+- Create: `maxbot/evals/benchmark_runner.py`
+- Create: `maxbot/evals/report_store.py`
+- Create: `tests/test_phase8_benchmark_runner.py`
+- Modify: `maxbot/evals/__init__.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `BenchmarkRunner.run_suite()` 可接受 suite + outputs 并产出结构化 report
+- report 中包含 `suite_id / pass_rate / avg_score / gate / results`
+- `ReportStore.write_report()` / `latest()` / `list_recent()` 顺序稳定
+- runner 可选自动把 report 写入 report store
+- benchmark quality gate 失败时，report 中保留 fail-closed 原因
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_runner.py -q
+```
+Expected: FAIL — `benchmark_runner` / `report_store` 尚不存在
+
+**Step 3: Implement minimal execution loop**
+- `BenchmarkRunner` 只负责：
+  - 调 grader
+  - 调 quality gate
+  - 组装 report
+- 不引入真正模型调用；第一版直接消费外部传入 `outputs`
+- 保持和 `BenchmarkGrader` / `BenchmarkRegistry` 解耦
+
+**Step 4: Implement report store**
+- 用 JSON 文件保存 report
+- 至少保留：`report_id` / `suite_id` / `suite_name` / `pass_rate` / `avg_score` / `gate` / `results` / `created_at_ns`
+- 提供 `read_report()` / `latest()` / `list_recent()`
+
+**Step 5: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_runner.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `maxbot/evals/benchmark_runner.py` / `maxbot/evals/report_store.py` 已落地
+- ✅ suite 执行、report 写入、latest/list_recent 与 benchmark quality gate report 收口已补齐
+- ✅ 当前专项结果：benchmark runner slice → `3 passed`
+
+### Task B6: 补 executor-backed benchmark runner 与 execution failure 收口
+
+**Objective:** 把 benchmark runner 从“仅接受预先提供 outputs”推进到“可选执行器模式”，让 suite 能通过统一 executor 跑起来，并把 execution failure 明确纳入 fail-closed report。
+
+**Files:**
+- Modify: `maxbot/evals/benchmark_runner.py`
+- Modify: `tests/test_phase8_benchmark_runner.py`
+- Optionally Modify: `maxbot/evals/grader.py`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `run_suite()` 可接收 `executor(task) -> output` 的执行器
+- executor 模式下无需预先传 `outputs`
+- 单任务执行异常时，report 进入 fail-closed
+- report 中保留 `execution_failures` 与 gate 的阻断原因
+- 成功任务仍可正常产出 grading result
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_runner.py -q
+```
+Expected: FAIL — runner 尚不支持 executor / execution_failures
+
+**Step 3: Implement minimal executor path**
+- 支持二选一输入：
+  - `outputs`
+  - `executor`
+- 若同时给出，优先使用显式 `outputs`
+- executor 异常时：
+  - 收集到 `execution_failures`
+  - 对该任务打 0 分
+  - report gate fail-closed
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_runner.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `run_suite()` 已支持 `executor(task) -> output` 模式
+- ✅ `execution_failures`、executor fail-closed 与报告字段已补齐
+- ✅ 当前专项结果：benchmark runner slice → `5 passed`
+
+### Task B7: 扩展 grader policy / suite enrichment / quality gate closure
+
+**Objective:** 把 Phase 8 的评测基础设施从“最小可运行”继续推进到“更接近 Phase 9 可用”：支持更丰富的 grading policy、按样本特征构建 suite，以及更完整的 quality gate 阻断规则。
+
+**Files:**
+- Modify: `maxbot/evals/sample_store.py`
+- Modify: `maxbot/evals/benchmark_registry.py`
+- Modify: `maxbot/evals/grader.py`
+- Modify: `maxbot/evals/benchmark_runner.py`
+- Modify: `tests/test_phase8_benchmark_registry.py`
+- Modify: `tests/test_phase8_grader.py`
+- Modify: `tests/test_phase8_benchmark_runner.py`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `register_from_eval_samples()` 支持按 `labels` / `metadata_filter` 筛选样本生成 suite
+- suite metadata 中保留 `source_sample_count` 等最小 enrichment 信息
+- `BenchmarkGrader.grade_task()` 支持：
+  - `normalize_whitespace`
+  - `min_keyword_coverage`
+- `evaluate_benchmark_quality_gate()` 支持：
+  - `min_tasks_total`
+  - `max_execution_failures`
+- runner 把 execution failure 交给统一 quality gate 收口，而不是写死分支理由
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_benchmark_registry.py \
+  tests/test_phase8_grader.py \
+  tests/test_phase8_benchmark_runner.py -q
+```
+Expected: FAIL — registry/grader/gate 还不支持 richer policy 与 enrichment
+
+**Step 3: Implement minimal richer policy layer**
+- sample store / benchmark registry 增加标签与 metadata 过滤
+- benchmark task metadata 透传样本标签
+- grader 增加 whitespace-normalized exact match 与 keyword coverage threshold
+- quality gate 增加 `insufficient_tasks` / `execution_failures` 两类阻断原因
+- runner 统一走 `evaluate_benchmark_quality_gate()`
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_benchmark_registry.py \
+  tests/test_phase8_grader.py \
+  tests/test_phase8_benchmark_runner.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ sample 过滤、suite enrichment、normalized exact match、keyword coverage threshold 已落地
+- ✅ quality gate 对 `tasks_total` / `execution_failures` 的统一收口已补齐
+- ✅ 当前专项结果：registry/grader/runner richer policy slice → `13 passed`
+
+### Task B8: 补 quality gate profile 与 report comparison / trend summary
+
+**Objective:** 把 Phase 8 评测基础设施再推进一层：补可复用 quality gate profile，并能比较两次 benchmark report，为 Phase 9 的质量门趋势分析打底。
+
+**Files:**
+- Modify: `maxbot/evals/grader.py`
+- Modify: `maxbot/evals/report_store.py`
+- Modify: `maxbot/evals/__init__.py`
+- Create: `tests/test_phase8_report_profiles.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `get_quality_gate_policy("strict|standard|relaxed")` 返回稳定 profile
+- `evaluate_benchmark_quality_gate()` 支持直接接收 profile name
+- `ReportStore.compare_reports(old_id, new_id)` 输出：
+  - `pass_rate_delta`
+  - `avg_score_delta`
+  - `passed_changed`
+- `ReportStore.trend_summary(limit=N)` 输出最近 N 次 report 的趋势摘要
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_report_profiles.py -q
+```
+Expected: FAIL — 还不存在 profile / report comparison / trend summary 能力
+
+**Step 3: Implement minimal profile + comparison layer**
+- 先内置三套 gate profile：
+  - `strict`
+  - `standard`
+  - `relaxed`
+- report store 增加：
+  - `compare_reports(old_id, new_id)`
+  - `trend_summary(limit=...)`
+- comparison 只做数值 delta 与 pass/fail 翻转，不做复杂 root cause 分析
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_report_profiles.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `strict / standard / relaxed` 三套 quality gate profile 已落地
+- ✅ `ReportStore.compare_reports()` / `trend_summary()` 已补齐
+- ✅ 当前专项结果：report profile slice → `4 passed`
+
+### Task B9: 补 composable grading policy 与多报告趋势聚合
+
+**Objective:** 在已有 profile 与 report comparison 基础上，继续向 Phase 9 入口推进：支持更细粒度 rule-level 评分拆解，以及跨多次 report 的聚合摘要。
+
+**Files:**
+- Modify: `maxbot/evals/grader.py`
+- Modify: `maxbot/evals/report_store.py`
+- Create/Modify: `tests/test_phase8_report_profiles.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `grade_task()` 输出 rule-level breakdown（如 exact / keyword）
+- `grade_suite()` 输出 aggregated rule summary
+- `trend_summary(limit=N)` 给出 average deltas / latest gate profile 概览
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_report_profiles.py -q
+```
+Expected: FAIL — 还未支持组合式评分拆解与趋势聚合
+
+**Step 3: Implement minimal composition layer**
+- 先做 deterministic rule breakdown，不引入 LLM judge
+- trend 聚合先做 pass_rate / avg_score / gate pass 次数统计
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_report_profiles.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `BenchmarkGrader.grade_task()` 已支持 `grading_rules` 组合式评分与 rule-level breakdown
+- ✅ `BenchmarkGrader.grade_suite()` 已输出 `rule_summary`（含 `avg_score` / `avg_weighted_score` / `avg_pass_rate`）
+- ✅ `BenchmarkRunner.run_suite()` 已把 `rule_summary` 写入 report
+- ✅ `ReportStore.compare_reports()` 已支持 `rule_summary_delta`
+- ✅ `ReportStore.trend_summary()` 已支持 `avg_pass_rate_delta` / `avg_score_delta` / 聚合后的 `rule_summary`
+- ✅ 当前专项结果：`tests/test_phase8_grader.py tests/test_phase8_report_profiles.py -q` → `11 passed`
+
+### Task B10: 补 suite selection policy / coverage summary / report-level operational highlights
+
+**Objective:** 在已有 composable grading 与 multi-report aggregation 基础上，继续向 Phase 9 运营层推进：让 suite 具备更明确的选择策略与覆盖摘要，并让 report / trend 能直接给出 weakest / strongest / changed rules 这种运营视角高亮。
+
+**Files:**
+- Modify: `maxbot/evals/benchmark_registry.py`
+- Modify: `maxbot/evals/benchmark_runner.py`
+- Modify: `maxbot/evals/report_store.py`
+- Modify: `tests/test_phase8_benchmark_registry.py`
+- Modify: `tests/test_phase8_report_profiles.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `register_from_eval_samples()` 写入 `selection_policy` 与 `coverage_summary`
+- `build_task_set()` 支持 `suite_metadata_filter`
+- `run_suite()` 产出 report-level `summary`
+- `compare_reports()` / `trend_summary()` 输出 `changed_rules`
+- latest report/trend 能输出 `weakest_rule` / `strongest_rule`
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py -q
+```
+Expected: FAIL — 还未支持 suite selection / report operational highlights
+
+**Step 3: Implement minimal operational layer**
+- suite metadata 中记录 labels / metadata_filter / limit
+- 基于样本 labels 与 metadata 做覆盖摘要
+- report summary 先提供 deterministic weakest/strongest rule 高亮
+- changed rules 先基于 rule summary delta 计算，不做复杂 RCA
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `BenchmarkRegistry.register_from_eval_samples()` 已记录 `selection_policy` / `coverage_summary`
+- ✅ `BenchmarkRegistry.build_task_set()` 已支持 `suite_metadata_filter`
+- ✅ `BenchmarkRunner.run_suite()` 已输出 report-level `summary`
+- ✅ `ReportStore.compare_reports()` / `trend_summary()` 已支持 `changed_rules`
+- ✅ report/trend 已可输出 `weakest_rule` / `strongest_rule`
+- ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q` → `17 passed`
+
 ---
 
 ## 4. Workstream C：Memory / Instinct / Skill Promotion Policy
