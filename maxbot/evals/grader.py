@@ -262,6 +262,37 @@ def list_quality_gate_policies() -> list[str]:
     return sorted(_QUALITY_GATE_PROFILES)
 
 
+def _select_rule_highlight(rule_summary: dict[str, dict[str, Any]], *, mode: str) -> dict[str, Any] | None:
+    if not rule_summary:
+        return None
+    selector = min if mode == "weakest" else max
+    rule_type, summary = selector(
+        rule_summary.items(),
+        key=lambda item: (float(item[1].get("avg_weighted_score", 0.0)), item[0]),
+    )
+    return {"rule_type": rule_type, **dict(summary)}
+
+
+def _derive_blocking_rule(*, blocking_reason: str | None, weakest_rule: dict[str, Any] | None) -> dict[str, Any] | None:
+    if blocking_reason in {"pass_rate", "avg_score"}:
+        return deepcopy(weakest_rule) if weakest_rule else None
+    return None
+
+
+def _recommended_action(*, blocking_reason: str | None, blocking_rule: dict[str, Any] | None) -> str | None:
+    if blocking_rule and blocking_rule.get("rule_type"):
+        return f"improve_{blocking_rule['rule_type']}"
+    if blocking_reason == "execution_failures":
+        return "fix_execution_failures"
+    if blocking_reason == "insufficient_tasks":
+        return "add_more_tasks"
+    if blocking_reason == "pass_rate":
+        return "improve_pass_rate"
+    if blocking_reason == "avg_score":
+        return "improve_avg_score"
+    return None
+
+
 def evaluate_benchmark_quality_gate(
     report: dict[str, Any],
     policy: dict[str, Any] | str | None = None,
@@ -303,6 +334,8 @@ def evaluate_benchmark_quality_gate(
 
     advisories = list(rule_summary.keys())
     should_block = blocking_reason is not None and policy_mode == "blocking"
+    weakest_rule = _select_rule_highlight(rule_summary, mode="weakest")
+    blocking_rule = _derive_blocking_rule(blocking_reason=blocking_reason, weakest_rule=weakest_rule)
     return {
         "passed": should_block is False,
         "blocking_reason": blocking_reason,
@@ -312,15 +345,25 @@ def evaluate_benchmark_quality_gate(
         "execution_failures": execution_failures,
         "policy": thresholds,
         "profile": policy_name,
+        "policy_mode": policy_mode,
         "policy_description": policy_description,
         "operating_mode": policy_name or "custom",
         "blocking_summary": {
             "blocking": should_block,
             "primary_reason": blocking_reason,
+            "severity": "release_blocker" if policy_name == "release_blocker" else (policy_name or policy_mode),
+            "weakest_rule": weakest_rule,
+            "blocking_rule": blocking_rule,
+            "recommended_action": _recommended_action(blocking_reason=blocking_reason, blocking_rule=blocking_rule),
         },
         "advisories": advisories,
         "advisory_summary": {
             "has_advisories": bool(advisories),
             "count": len(advisories),
+            "rules": advisories,
+        },
+        "release_summary": {
+            "is_release_blocker": policy_name == "release_blocker",
+            "ready": policy_name == "release_blocker" and blocking_reason is None,
         },
     }

@@ -1,7 +1,7 @@
 # MaxBot 进化计划进度追踪
 
 **最后更新：** 2026-04-19  
-**当前阶段：** Phase 1~7 主线已完成，Phase 8 已完成封板准备，Phase 9 首批 gate bundle / advisory 联动已进入实施中  
+**当前阶段：** Phase 1~7 主线已完成，Phase 8 已完成封板准备，Phase 9 已落地 gate bundle + release_blocker / blocking/report 联动第二刀  
 **整体进度：** 约 75%（7/12 个阶段已完成，Phase 8 已封板准备完成，Phase 9 已启动）
 
 ---
@@ -17,7 +17,7 @@ Phase 5:  ████████████████████ 100% ✅ 
 Phase 6:  ████████████████████ 100% ✅ runtime 主链/legacy 兼容层/工具契约已收口
 Phase 7:  ████████████████████ 100% ✅ compact hooks / profile / 阻断路径已收口
 Phase 8:  ████████████████░░░░  80% 🟡 收官中
-Phase 9:  ███░░░░░░░░░░░░░░░░   15% 🟡 启动中
+Phase 9:  █████░░░░░░░░░░░░░░   25% 🟡 推进中
 Phase 10: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 11: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
@@ -338,8 +338,8 @@ python3 -m pytest \
 - 计划文档：`docs/phase8-reflection-memory-plan.md`
 
 ### 第九阶段：测试和质量保证
-- **状态：** 🟡 实施中（首批 named gate bundles / advisory_summary / policy listing 已落地）
-- 现状：当前已在 `maxbot/evals/grader.py` 中引入 richer quality gate profile 结构（含 `description`、`mode`、`thresholds`）、`list_quality_gate_policies()`、`advisory_summary` 与 `policy_description`；Phase 9 已从“启动准备”进入第一批代码实现阶段。
+- **状态：** 🟡 推进中（named gate bundles、advisory_summary / policy listing、release_blocker 运营语义、blocking/report 联动第二刀已落地）
+- 现状：当前已在 `maxbot/evals/grader.py` 中引入 richer quality gate profile 结构（含 `description`、`mode`、`thresholds`）、`list_quality_gate_policies()`、`advisory_summary`、`policy_description`、`policy_mode`、`blocking_rule`、`recommended_action` 与 `release_summary`；其中 `release_summary.ready` 仅在 `release_blocker` 且无阻断原因时为真。`BenchmarkRunner` / `ReportStore` 也已补齐 gate summary、blocking transition 与 trend 级摘要联动，并区分 policy shift 与真实质量回归，Phase 9 已进入质量计划运营层第二刀。
 
 ### 第十阶段：文档和培训
 - **状态：** ⏳ 待开始
@@ -390,7 +390,8 @@ python3 -m pytest \
 12. ✅ suite policy bundle / reusable gate policy profile groundwork 已补齐（`tests/test_phase8_benchmark_registry.py` + `tests/test_phase8_report_profiles.py` 新增切片已收口）
 13. ✅ Phase 8 已达到“基础设施封板前”状态（reflection / metrics / eval sample / benchmark / report / suite/gate bundle groundwork 已齐备）
 14. ✅ 已新建 `docs/phase9-quality-program-plan.md`，并完成 Phase 9 首批 gate policy bundle / advisory_summary / policy listing 落地
-15. 下一步继续沿 `docs/phase9-quality-program-plan.md` 推进：补齐 richer named suite strategy set、release_blocker 语义与 blocking/advisory/report 联动
+15. ✅ 已沿 `docs/phase9-quality-program-plan.md` 补齐 `release_blocker` 语义与 blocking/advisory/report 联动第二刀
+16. 下一步继续沿 `docs/phase9-quality-program-plan.md` 推进：补齐 richer named suite strategy set、suite/gate 组合约束与更正式 release-style quality program 汇总
 
 ### P1：继续收口历史文档与仓库卫生
 
@@ -431,7 +432,7 @@ python3 -m pytest \
 - Phase 8 reflection / metrics / trace / eval sample / promotion 回归切片 + config defaults → `32 passed`
 - Phase 8 benchmark registry / grader groundwork + richer grading policy / suite enrichment + auto-assembly + suite bundle → `17 passed`
 - Phase 8 benchmark runner / report store / executor fail-closed + report summary highlights + gate operating fields → `23 passed`
-- Phase 8/9 quality gate profiles / report comparison / trend summary + composable grading / rule breakdown / multi-report aggregation + suite selection policy + named gate bundles → `17 passed`
+- Phase 8/9 quality gate profiles / report comparison / trend summary + composable grading / rule breakdown / multi-report aggregation + suite selection policy + named gate bundles + release_blocker / blocking transition 联动 → `23 passed`
 
 ### 相关文档
 
@@ -445,5 +446,5 @@ python3 -m pytest \
 
 **进度更新：** ✅ 已更新  
 **最后更新：** 2026-04-19  
-**当前状态：** 🟡 Phase 8 基础设施层已完成封板准备；🟡 Phase 9 质量计划运营层首批能力（named gate bundles / advisory_summary / policy listing）已落地；历史 Phase 1~7 文档口径已完成第一轮收口  
-**当前回答：** 本轮已正式按 Phase 9 口径推进，落地了 richer gate profile 结构、`list_quality_gate_policies()`、`release_blocker` / `advisory` 等命名质量门，以及 `advisory_summary` / `policy_description` 字段；下一步继续做 richer named suite strategy set 与 blocking/advisory/report 联动。
+**当前状态：** 🟡 Phase 8 基础设施层已完成封板准备；🟡 Phase 9 质量计划运营层第二刀（named gate bundles + `release_blocker` 运营语义 + blocking/report 联动）已落地；历史 Phase 1~7 文档口径已完成第一轮收口  
+**当前回答：** 本轮继续按 Phase 9 推进，已补齐 `policy_mode`、`blocking_rule`、`recommended_action`、`release_summary`、report-level gate summary，以及跨报告 `blocking_transition` / trend 联动；同时修正了 advisory 模式下的 `release_summary.ready` 语义，并让 report diff 能区分 policy shift 与真实质量回归。下一步继续做 richer named suite strategy set 与 suite/gate 组合约束。

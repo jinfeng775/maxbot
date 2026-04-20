@@ -231,3 +231,43 @@ def test_benchmark_grader_emits_suite_rule_summary_for_composite_rules():
     assert result["rule_summary"]["keyword_coverage"]["rule_count"] == 2
     assert result["rule_summary"]["keyword_coverage"]["pass_count"] == 2
     assert result["rule_summary"]["keyword_coverage"]["avg_weighted_score"] == 0.55
+
+
+def test_release_blocker_gate_emits_operational_blocking_and_release_summary():
+    from maxbot.evals.grader import evaluate_benchmark_quality_gate
+
+    gate = evaluate_benchmark_quality_gate(
+        {
+            "tasks_total": 2,
+            "pass_rate": 1.0,
+            "avg_score": 0.6,
+            "execution_failures": [],
+            "rule_summary": {
+                "exact_match_normalized": {
+                    "rule_count": 2,
+                    "pass_count": 0,
+                    "avg_score": 0.0,
+                    "avg_weighted_score": 0.0,
+                    "avg_pass_rate": 0.0,
+                },
+                "keyword_coverage": {
+                    "rule_count": 2,
+                    "pass_count": 2,
+                    "avg_score": 1.0,
+                    "avg_weighted_score": 0.6,
+                    "avg_pass_rate": 1.0,
+                },
+            },
+        },
+        policy="release_blocker",
+    )
+
+    assert gate["policy_mode"] == "blocking"
+    assert gate["blocking_reason"] == "avg_score"
+    assert gate["blocking_summary"]["severity"] == "release_blocker"
+    assert gate["blocking_summary"]["weakest_rule"]["rule_type"] == "exact_match_normalized"
+    assert gate["blocking_summary"]["blocking_rule"]["rule_type"] == "exact_match_normalized"
+    assert gate["blocking_summary"]["recommended_action"] == "improve_exact_match_normalized"
+    assert gate["advisory_summary"]["rules"] == ["exact_match_normalized", "keyword_coverage"]
+    assert gate["release_summary"]["is_release_blocker"] is True
+    assert gate["release_summary"]["ready"] is False

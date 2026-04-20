@@ -44,6 +44,8 @@ class ReportStore:
     def compare_reports(self, old_report_id: str, new_report_id: str) -> dict[str, Any]:
         old_report = self.read_report(old_report_id)
         new_report = self.read_report(new_report_id)
+        old_profile = old_report.get("gate", {}).get("profile") or old_report.get("gate", {}).get("policy_name")
+        new_profile = new_report.get("gate", {}).get("profile") or new_report.get("gate", {}).get("policy_name")
         rule_summary_delta = self._diff_rule_summary(
             old_report.get("rule_summary") or {},
             new_report.get("rule_summary") or {},
@@ -55,6 +57,20 @@ class ReportStore:
             "avg_score_delta": self._round(float(new_report.get("avg_score", 0.0)) - float(old_report.get("avg_score", 0.0))),
             "passed_changed": bool(new_report.get("gate", {}).get("passed")) != bool(old_report.get("gate", {}).get("passed")),
             "latest_profile": new_report.get("gate", {}).get("profile") or new_report.get("gate", {}).get("policy_name"),
+            "policy_changed": old_profile != new_profile,
+            "profile_transition": {
+                "from": old_profile,
+                "to": new_profile,
+            },
+            "blocking_reason_changed": (new_report.get("gate", {}).get("blocking_reason") != old_report.get("gate", {}).get("blocking_reason")),
+            "blocking_transition": {
+                "from": old_report.get("gate", {}).get("blocking_reason"),
+                "to": new_report.get("gate", {}).get("blocking_reason"),
+                "resolved": old_profile == new_profile and bool(old_report.get("gate", {}).get("blocking_reason")) and new_report.get("gate", {}).get("blocking_reason") is None,
+                "regressed": old_profile == new_profile and old_report.get("gate", {}).get("blocking_reason") is None and bool(new_report.get("gate", {}).get("blocking_reason")),
+                "policy_changed": old_profile != new_profile,
+            },
+            "latest_weakest_rule": new_report.get("summary", {}).get("weakest_rule"),
             "rule_summary_delta": rule_summary_delta,
             "changed_rules": self._changed_rules(rule_summary_delta),
         }
@@ -66,6 +82,8 @@ class ReportStore:
                 "reports_considered": 0,
                 "latest_report_id": None,
                 "latest_profile": None,
+                "latest_blocking_reason": None,
+                "latest_advisories": [],
                 "gate_pass_count": 0,
                 "pass_rate_trend": "flat",
                 "avg_score_trend": "flat",
@@ -76,6 +94,7 @@ class ReportStore:
                     "weakest_rule": None,
                     "strongest_rule": None,
                     "changed_rules": [],
+                    "release_summary": {},
                 },
             }
 
@@ -93,6 +112,8 @@ class ReportStore:
             "reports_considered": len(reports),
             "latest_report_id": latest.get("report_id"),
             "latest_profile": latest_policy,
+            "latest_blocking_reason": latest.get("gate", {}).get("blocking_reason"),
+            "latest_advisories": list(latest.get("gate", {}).get("advisories") or []),
             "gate_pass_count": gate_pass_count,
             "pass_rate_trend": self._trend_label(first_pass_rate, latest_pass_rate),
             "avg_score_trend": self._trend_label(first_avg_score, latest_avg_score),
@@ -103,6 +124,7 @@ class ReportStore:
                 "weakest_rule": self._select_rule_highlight(aggregated_rule_summary, mode="weakest"),
                 "strongest_rule": self._select_rule_highlight(aggregated_rule_summary, mode="strongest"),
                 "changed_rules": changed_rules,
+                "release_summary": dict(latest.get("gate", {}).get("release_summary") or {}),
             },
         }
 

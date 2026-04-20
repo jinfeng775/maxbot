@@ -314,10 +314,25 @@ python3 -m pytest \
 
 ### 9.1 测试套件建设
 
-**质量目标：**
-- 代码覆盖率 > 80%
-- 所有测试通过
-- 安全扫描无高危问题
+**当前状态：** 🟡 已进入质量计划运营层第二刀（named gate bundles、release_blocker 运营语义、blocking/report 联动已落地）
+
+**当前已落地：**
+- ✅ named quality gate bundles：`strict` / `standard` / `relaxed` / `advisory` / `release_blocker`
+- ✅ richer gate profile 结构：`description` / `mode` / `thresholds`
+- ✅ `list_quality_gate_policies()`
+- ✅ `advisory_summary` / `policy_description`
+- ✅ `policy_mode` / `blocking_rule` / `recommended_action` / `release_summary`
+- ✅ `BenchmarkRunner` summary 回写 gate 运营字段
+- ✅ `ReportStore.compare_reports()` 输出 `blocking_transition`，并能区分 policy shift 与真实质量回归
+- ✅ `ReportStore.trend_summary()` 输出 latest blocking/advisory/release 摘要
+
+**当前优先下一步：**
+1. richer named suite strategy set
+2. suite/gate 组合约束与推荐
+3. 更正式 release-style quality program summary
+
+**阶段计划文档：**
+- `docs/phase9-quality-program-plan.md`
 
 ---
 
@@ -396,6 +411,6 @@ Week 23-24: 持续改进
 **计划状态**: ✅ 第五阶段已完成  
 **计划状态**: ✅ 第六阶段已完成  
 **计划状态**: ✅ 第七阶段已完成  
-**当前阶段**: 🟡 第八阶段实施中 / 部署态进化基础设施（Reflection runtime + metrics/trace/eval sample + promotion policy + benchmark/grader/runner/report store + profile/comparison/trend + composable grading/breakdown/aggregation + suite selection/report highlights + auto-assembly/gate-ops + suite/gate bundles 已连续落地）  
-**当前计划**: `docs/phase8-reflection-memory-plan.md`  
+**当前阶段**: 🟡 第九阶段推进中 / 质量计划运营层（named gate bundles + `release_blocker` 运营语义 + blocking/report 联动第二刀已落地）  
+**当前计划**: `docs/phase9-quality-program-plan.md`  
 **并行收口**: Phase 1~7 历史审计文档与仓库卫生问题持续清理

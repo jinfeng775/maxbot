@@ -236,6 +236,64 @@ Expected: PASS
 - ✅ gate result 已输出 `advisory_summary` / `policy_description`
 - ✅ 当前专项结果：`tests/test_phase8_report_profiles.py -q` → `10 passed`
 
+### Task C3: 补齐 blocking/advisory/report 联动与 release_blocker 语义
+
+**Objective:** 让 Phase 9 质量门不只会“给出一个 passed/failed”，而是能把阻断原因、最弱规则、建议动作、release 语义以及跨报告的阻断状态变化一起结构化输出。
+
+**Files:**
+- Modify: `tests/test_phase8_grader.py`
+- Modify: `tests/test_phase8_report_profiles.py`
+- Modify: `maxbot/evals/grader.py`
+- Modify: `maxbot/evals/benchmark_runner.py`
+- Modify: `maxbot/evals/report_store.py`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `release_blocker` 返回：
+  - `policy_mode`
+  - `blocking_summary.severity`
+  - `blocking_summary.weakest_rule`
+  - `blocking_summary.blocking_rule`
+  - `blocking_summary.recommended_action`
+  - `release_summary`
+- report summary 回写 gate 运营字段
+- `compare_reports()` 输出 blocking transition
+- `trend_summary()` 输出 latest blocking reason / advisories / release summary
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_grader.py::test_release_blocker_gate_emits_operational_blocking_and_release_summary \
+  tests/test_phase8_report_profiles.py::test_report_store_tracks_blocking_transitions_and_release_gate_summary -q
+```
+Expected: FAIL — 尚未输出 release blocker 运营语义与跨报告阻断变更摘要
+
+**Step 3: Implement runtime/report linkage**
+至少新增：
+- gate-level weakest/blocking rule selection
+- recommended action derivation
+- release blocker summary
+- runner summary 回写 gate operational fields
+- report diff/trend 输出 blocking/advisory 变更
+
+**Step 4: Re-run focused validation**
+Run:
+```bash
+python3 -m pytest \
+  tests/test_phase8_grader.py::test_release_blocker_gate_emits_operational_blocking_and_release_summary \
+  tests/test_phase8_report_profiles.py::test_report_store_tracks_blocking_transitions_and_release_gate_summary -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19，第二刀）**
+- ✅ `release_blocker` 已输出 `policy_mode` / `blocking_summary.severity` / `blocking_rule` / `recommended_action`
+- ✅ gate 已输出 `release_summary`（仅在 `release_blocker` 且无阻断原因时标记 `ready=True`）
+- ✅ `BenchmarkRunner` summary 已回写 gate 运营字段
+- ✅ `ReportStore.compare_reports()` 已输出 `blocking_reason_changed` / `blocking_transition`，并区分 policy shift 与真实质量回归
+- ✅ `ReportStore.trend_summary()` 已输出 `latest_blocking_reason` / `latest_advisories` / `summary.release_summary`
+- ✅ RED→GREEN 验证结果：新增两条定向测试已从 `2 failed` 收口到 `2 passed`
+
 ---
 
 ## 5. Workstream D：Phase 9 启动回归与提交

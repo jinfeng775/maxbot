@@ -417,3 +417,175 @@ def test_quality_gate_lists_named_policy_bundles_and_emits_advisory_summary(tmp_
     assert gate["blocking_summary"]["blocking"] is False
     assert gate["advisory_summary"]["has_advisories"] is True
     assert gate["policy_description"] == advisory["description"]
+    assert gate["release_summary"]["is_release_blocker"] is False
+    assert gate["release_summary"]["ready"] is False
+
+
+def test_report_store_tracks_blocking_transitions_and_release_gate_summary(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.report_store import ReportStore
+
+    suite = {
+        "suite_id": "suite-phase9-release-ops",
+        "suite_name": "phase9-release-ops",
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请给出 phase9 质量状态",
+                "expected_output": "phase9 quality ready",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.5},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["phase9", "quality", "ready"],
+                            "weight": 0.5,
+                        },
+                    ],
+                    "min_composite_score": 0.5,
+                },
+            },
+            {
+                "task_id": "task-2",
+                "prompt": "请给出 trace 状态",
+                "expected_output": "memory trace stable",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.5},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["memory", "trace", "stable"],
+                            "weight": 0.5,
+                        },
+                    ],
+                    "min_composite_score": 0.5,
+                },
+            },
+        ],
+    }
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    runner = BenchmarkRunner(report_store=store)
+
+    first_report = runner.run_suite(
+        suite=suite,
+        outputs={
+            "task-1": "phase9 quality ready extra",
+            "task-2": "memory trace stable later",
+        },
+        policy="release_blocker",
+        persist=True,
+    )
+    second_report = runner.run_suite(
+        suite=suite,
+        outputs={
+            "task-1": "phase9 quality ready",
+            "task-2": "memory trace stable",
+        },
+        policy="release_blocker",
+        persist=True,
+    )
+
+    assert first_report["gate"]["blocking_reason"] == "avg_score"
+    assert first_report["summary"]["gate"]["blocking_rule"]["rule_type"] == "exact_match_normalized"
+    assert first_report["summary"]["gate"]["release_summary"]["is_release_blocker"] is True
+    assert second_report["gate"]["blocking_reason"] is None
+
+    comparison = store.compare_reports(first_report["report_id"], second_report["report_id"])
+    assert comparison["blocking_reason_changed"] is True
+    assert comparison["blocking_transition"] == {
+        "from": "avg_score",
+        "to": None,
+        "resolved": True,
+        "regressed": False,
+        "policy_changed": False,
+    }
+    assert comparison["latest_weakest_rule"]["rule_type"] == "exact_match_normalized"
+
+    trend = store.trend_summary(limit=2)
+    assert trend["latest_blocking_reason"] is None
+    assert trend["latest_advisories"] == ["exact_match_normalized", "keyword_coverage"]
+    assert trend["summary"]["release_summary"]["is_release_blocker"] is True
+
+
+def test_report_store_separates_policy_shift_from_quality_regression(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.report_store import ReportStore
+
+    suite = {
+        "suite_id": "suite-phase9-policy-shift",
+        "suite_name": "phase9-policy-shift",
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请给出 phase9 质量状态",
+                "expected_output": "phase9 quality ready",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.5},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["phase9", "quality", "ready"],
+                            "weight": 0.5,
+                        },
+                    ],
+                    "min_composite_score": 0.5,
+                },
+            },
+            {
+                "task_id": "task-2",
+                "prompt": "请给出 trace 状态",
+                "expected_output": "memory trace stable",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.5},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["memory", "trace", "stable"],
+                            "weight": 0.5,
+                        },
+                    ],
+                    "min_composite_score": 0.5,
+                },
+            },
+        ],
+    }
+
+    store = ReportStore(tmp_path / "benchmark-reports")
+    runner = BenchmarkRunner(report_store=store)
+
+    advisory_report = runner.run_suite(
+        suite=suite,
+        outputs={
+            "task-1": "phase9 quality ready extra",
+            "task-2": "memory trace stable later",
+        },
+        policy="advisory",
+        persist=True,
+    )
+    release_report = runner.run_suite(
+        suite=suite,
+        outputs={
+            "task-1": "phase9 quality ready extra",
+            "task-2": "memory trace stable later",
+        },
+        policy="release_blocker",
+        persist=True,
+    )
+
+    comparison = store.compare_reports(advisory_report["report_id"], release_report["report_id"])
+    assert comparison["latest_profile"] == "release_blocker"
+    assert comparison["policy_changed"] is True
+    assert comparison["profile_transition"] == {"from": "advisory", "to": "release_blocker"}
+    assert comparison["blocking_reason_changed"] is True
+    assert comparison["blocking_transition"]["from"] is None
+    assert comparison["blocking_transition"]["to"] == "avg_score"
+    assert comparison["blocking_transition"]["regressed"] is False
+    assert comparison["blocking_transition"]["policy_changed"] is True
+
+    reverse = store.compare_reports(release_report["report_id"], advisory_report["report_id"])
+    assert reverse["policy_changed"] is True
+    assert reverse["blocking_transition"]["from"] == "avg_score"
+    assert reverse["blocking_transition"]["to"] is None
+    assert reverse["blocking_transition"]["resolved"] is False
+    assert reverse["blocking_transition"]["policy_changed"] is True

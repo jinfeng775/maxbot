@@ -56,17 +56,17 @@ class BenchmarkRunner:
             "avg_score": graded.get("avg_score", 0.0),
             "results": graded.get("results", []),
             "rule_summary": graded.get("rule_summary", {}),
-            "summary": self._build_report_summary(suite=suite, graded=graded),
             "gate": gate,
             "execution_failures": execution_failures,
         }
+        report["summary"] = self._build_report_summary(suite=suite, graded=graded, gate=gate)
         if persist:
             store = self.report_store or ReportStore(Path.home() / ".maxbot" / "benchmark_reports")
             report_id = store.write_report(report)
             report["report_id"] = report_id
         return report
 
-    def _build_report_summary(self, *, suite: dict[str, Any], graded: dict[str, Any]) -> dict[str, Any]:
+    def _build_report_summary(self, *, suite: dict[str, Any], graded: dict[str, Any], gate: dict[str, Any]) -> dict[str, Any]:
         rule_summary = graded.get("rule_summary") or {}
         return {
             "suite_metadata": dict(suite.get("metadata") or {}),
@@ -78,6 +78,12 @@ class BenchmarkRunner:
             },
             "weakest_rule": self._select_rule_highlight(rule_summary, mode="weakest"),
             "strongest_rule": self._select_rule_highlight(rule_summary, mode="strongest"),
+            "gate": {
+                "blocking_rule": gate.get("blocking_summary", {}).get("blocking_rule"),
+                "weakest_rule": gate.get("blocking_summary", {}).get("weakest_rule"),
+                "advisories": list(gate.get("advisories") or []),
+                "release_summary": dict(gate.get("release_summary") or {}),
+            },
         }
 
     def _select_rule_highlight(self, rule_summary: dict[str, dict[str, Any]], *, mode: str) -> dict[str, Any] | None:
