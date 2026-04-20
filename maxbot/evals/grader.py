@@ -1,27 +1,65 @@
 from __future__ import annotations
 
 import re
+from copy import deepcopy
 from typing import Any
 
 
-_QUALITY_GATE_PROFILES: dict[str, dict[str, float]] = {
+_QUALITY_GATE_PROFILES: dict[str, dict[str, Any]] = {
     "strict": {
-        "min_tasks_total": 2,
-        "min_pass_rate": 0.9,
-        "min_avg_score": 0.9,
-        "max_execution_failures": 0,
+        "name": "strict",
+        "description": "严格质量门：适合高置信度内部验收。",
+        "mode": "blocking",
+        "thresholds": {
+            "min_tasks_total": 2,
+            "min_pass_rate": 0.9,
+            "min_avg_score": 0.9,
+            "max_execution_failures": 0,
+        },
     },
     "standard": {
-        "min_tasks_total": 1,
-        "min_pass_rate": 0.7,
-        "min_avg_score": 0.75,
-        "max_execution_failures": 0,
+        "name": "standard",
+        "description": "标准质量门：适合常规回归与日常迭代。",
+        "mode": "blocking",
+        "thresholds": {
+            "min_tasks_total": 1,
+            "min_pass_rate": 0.7,
+            "min_avg_score": 0.75,
+            "max_execution_failures": 0,
+        },
     },
     "relaxed": {
-        "min_tasks_total": 1,
-        "min_pass_rate": 0.5,
-        "min_avg_score": 0.6,
-        "max_execution_failures": 1,
+        "name": "relaxed",
+        "description": "宽松质量门：适合基础探索与早期样本验证。",
+        "mode": "blocking",
+        "thresholds": {
+            "min_tasks_total": 1,
+            "min_pass_rate": 0.5,
+            "min_avg_score": 0.6,
+            "max_execution_failures": 1,
+        },
+    },
+    "advisory": {
+        "name": "advisory",
+        "description": "建议模式：保留建议与告警，但不阻断结果。",
+        "mode": "advisory",
+        "thresholds": {
+            "min_tasks_total": 1,
+            "min_pass_rate": 0.0,
+            "min_avg_score": 0.0,
+            "max_execution_failures": 1,
+        },
+    },
+    "release_blocker": {
+        "name": "release_blocker",
+        "description": "发布阻断模式：针对发布前收口，任务数和分数门槛更高。",
+        "mode": "blocking",
+        "thresholds": {
+            "min_tasks_total": 2,
+            "min_pass_rate": 0.95,
+            "min_avg_score": 0.95,
+            "max_execution_failures": 0,
+        },
     },
 }
 
@@ -214,50 +252,75 @@ class BenchmarkGrader:
         return round(value, 10)
 
 
-def get_quality_gate_policy(name: str) -> dict[str, float]:
+def get_quality_gate_policy(name: str) -> dict[str, Any]:
     if name not in _QUALITY_GATE_PROFILES:
         raise ValueError(f"Unknown quality gate profile: {name}")
-    return dict(_QUALITY_GATE_PROFILES[name])
+    return deepcopy(_QUALITY_GATE_PROFILES[name])
+
+
+def list_quality_gate_policies() -> list[str]:
+    return sorted(_QUALITY_GATE_PROFILES)
 
 
 def evaluate_benchmark_quality_gate(
     report: dict[str, Any],
-    policy: dict[str, float] | str | None = None,
+    policy: dict[str, Any] | str | None = None,
 ) -> dict[str, Any]:
     if isinstance(policy, str):
+        policy_def = get_quality_gate_policy(policy)
         policy_name = policy
-        policy = get_quality_gate_policy(policy)
+        policy_mode = str(policy_def.get("mode", "blocking"))
+        policy_description = policy_def.get("description")
+        thresholds = dict(policy_def.get("thresholds") or {})
     else:
         policy_name = None
-    policy = policy or get_quality_gate_policy("strict")
+        policy_mode = "blocking"
+        policy_description = None
+        thresholds = dict(policy or {})
+
+    if not thresholds:
+        default_policy = get_quality_gate_policy("strict")
+        policy_name = policy_name or default_policy["name"]
+        policy_mode = str(default_policy.get("mode", "blocking"))
+        policy_description = default_policy.get("description")
+        thresholds = dict(default_policy.get("thresholds") or {})
+
     tasks_total = int(report.get("tasks_total", 0))
     pass_rate = float(report.get("pass_rate", 0.0))
     avg_score = float(report.get("avg_score", 0.0))
     execution_failures = list(report.get("execution_failures") or [])
+    rule_summary = report.get("rule_summary") or {}
 
     blocking_reason = None
-    if len(execution_failures) > int(policy.get("max_execution_failures", 0)):
+    if len(execution_failures) > int(thresholds.get("max_execution_failures", 0)):
         blocking_reason = "execution_failures"
-    elif tasks_total < int(policy.get("min_tasks_total", 1)):
+    elif tasks_total < int(thresholds.get("min_tasks_total", 1)):
         blocking_reason = "insufficient_tasks"
-    elif pass_rate < float(policy.get("min_pass_rate", 1.0)):
+    elif pass_rate < float(thresholds.get("min_pass_rate", 1.0)):
         blocking_reason = "pass_rate"
-    elif avg_score < float(policy.get("min_avg_score", 1.0)):
+    elif avg_score < float(thresholds.get("min_avg_score", 1.0)):
         blocking_reason = "avg_score"
 
+    advisories = list(rule_summary.keys())
+    should_block = blocking_reason is not None and policy_mode == "blocking"
     return {
-        "passed": blocking_reason is None,
+        "passed": should_block is False,
         "blocking_reason": blocking_reason,
         "tasks_total": tasks_total,
         "pass_rate": pass_rate,
         "avg_score": avg_score,
         "execution_failures": execution_failures,
-        "policy": dict(policy),
+        "policy": thresholds,
         "profile": policy_name,
+        "policy_description": policy_description,
         "operating_mode": policy_name or "custom",
         "blocking_summary": {
-            "blocking": blocking_reason is not None,
+            "blocking": should_block,
             "primary_reason": blocking_reason,
         },
-        "advisories": list((report.get("rule_summary") or {}).keys()),
+        "advisories": advisories,
+        "advisory_summary": {
+            "has_advisories": bool(advisories),
+            "count": len(advisories),
+        },
     }

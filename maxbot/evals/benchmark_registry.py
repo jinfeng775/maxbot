@@ -11,22 +11,45 @@ from typing import Any
 from maxbot.evals.sample_store import EvalSampleStore
 
 
-_SUITE_POLICY_BUNDLES: dict[str, list[dict[str, Any]]] = {
-    "phase8_core": [
-        {"labels": ["analysis", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
-        {"labels": ["summary", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
-    ],
-    "phase8_runtime_mix": [
-        {"labels": ["analysis"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 2},
-        {"labels": ["summary"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
-    ],
+_SUITE_POLICY_BUNDLES: dict[str, dict[str, Any]] = {
+    "phase8_core": {
+        "name": "phase8_core",
+        "description": "Phase 8 基础能力混合样本集：analysis + summary，聚焦 runtime 质量基础设施。",
+        "target_phase": "phase8",
+        "selection_policies": [
+            {"labels": ["analysis", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
+            {"labels": ["summary", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
+        ],
+    },
+    "phase8_runtime_mix": {
+        "name": "phase8_runtime_mix",
+        "description": "Phase 8 runtime 样本混合集：更偏向 runtime/source=runtime 的 analysis/summary。",
+        "target_phase": "phase8",
+        "selection_policies": [
+            {"labels": ["analysis"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 2},
+            {"labels": ["summary"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
+        ],
+    },
+    "phase9_release_core": {
+        "name": "phase9_release_core",
+        "description": "Phase 9 发布前核心质量样本集：analysis + summary + runtime source。",
+        "target_phase": "phase9",
+        "selection_policies": [
+            {"labels": ["analysis"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
+            {"labels": ["summary"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
+        ],
+    },
 }
 
 
-def get_suite_policy_bundle(name: str) -> list[dict[str, Any]]:
+def get_suite_policy_bundle(name: str) -> dict[str, Any]:
     if name not in _SUITE_POLICY_BUNDLES:
         raise ValueError(f"Unknown suite policy bundle: {name}")
     return deepcopy(_SUITE_POLICY_BUNDLES[name])
+
+
+def list_suite_policy_bundles() -> list[str]:
+    return sorted(_SUITE_POLICY_BUNDLES)
 
 
 class BenchmarkRegistry:
@@ -108,6 +131,8 @@ class BenchmarkRegistry:
         selection_policies: list[dict[str, Any]],
         metadata: dict[str, Any] | None = None,
         bundle_name: str | None = None,
+        bundle_description: str | None = None,
+        target_phase: str | None = None,
     ) -> str:
         ordered_samples: list[dict[str, Any]] = []
         seen_task_ids: set[str] = set()
@@ -142,6 +167,10 @@ class BenchmarkRegistry:
         }
         if bundle_name:
             merged_metadata["assembly_policy"]["bundle_name"] = bundle_name
+        if bundle_description:
+            merged_metadata["assembly_policy"]["bundle_description"] = bundle_description
+        if target_phase:
+            merged_metadata["assembly_policy"]["target_phase"] = target_phase
         merged_metadata["coverage_summary"] = self._build_coverage_summary(ordered_samples)
         merged_metadata["source_sample_count"] = len(tasks)
         return self.register_suite(
@@ -159,13 +188,15 @@ class BenchmarkRegistry:
         bundle_name: str,
         metadata: dict[str, Any] | None = None,
     ) -> str:
-        selection_policies = get_suite_policy_bundle(bundle_name)
+        bundle = get_suite_policy_bundle(bundle_name)
         return self.auto_assemble_suite(
             suite_name=suite_name,
             sample_store=sample_store,
-            selection_policies=selection_policies,
+            selection_policies=bundle["selection_policies"],
             metadata=metadata,
             bundle_name=bundle_name,
+            bundle_description=bundle["description"],
+            target_phase=bundle["target_phase"],
         )
 
     def read_suite(self, suite_id: str) -> dict[str, Any]:

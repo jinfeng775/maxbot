@@ -293,5 +293,62 @@ def test_benchmark_registry_supports_named_suite_policy_bundle(tmp_path):
     suite = registry.read_suite(suite_id)
     bundle = get_suite_policy_bundle("phase8_core")
     assert suite["metadata"]["assembly_policy"]["bundle_name"] == "phase8_core"
-    assert suite["metadata"]["assembly_policy"]["policies_count"] == len(bundle)
+    assert suite["metadata"]["assembly_policy"]["policies_count"] == len(bundle["selection_policies"])
     assert len(suite["tasks"]) == 2
+
+
+
+def test_benchmark_registry_lists_named_suite_policy_bundles_and_enriches_bundle_metadata(tmp_path):
+    from maxbot.evals.benchmark_registry import (
+        BenchmarkRegistry,
+        get_suite_policy_bundle,
+        list_suite_policy_bundles,
+    )
+
+    sample_store = EvalSampleStore(tmp_path / "eval-samples")
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-c1",
+            "task_id": "task-c1",
+            "user_message": "请分析 release blocker",
+            "final_output": "release blocker 分析完成",
+            "success": True,
+        },
+        labels=["analysis", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-c2",
+            "task_id": "task-c2",
+            "user_message": "请总结 quality bundle",
+            "final_output": "quality bundle 总结完成",
+            "success": True,
+        },
+        labels=["summary", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+
+    bundles = list_suite_policy_bundles()
+    assert "phase8_core" in bundles
+    assert "phase9_release_core" in bundles
+
+    bundle = get_suite_policy_bundle("phase9_release_core")
+    assert bundle["name"] == "phase9_release_core"
+    assert bundle["target_phase"] == "phase9"
+    assert bundle["description"]
+    assert bundle["selection_policies"]
+
+    registry = BenchmarkRegistry(tmp_path / "benchmark-suites")
+    suite_id = registry.auto_assemble_suite_from_bundle(
+        suite_name="phase9-release-suite",
+        sample_store=sample_store,
+        bundle_name="phase9_release_core",
+        metadata={"phase": "phase9"},
+    )
+
+    suite = registry.read_suite(suite_id)
+    assembly_policy = suite["metadata"]["assembly_policy"]
+    assert assembly_policy["bundle_name"] == "phase9_release_core"
+    assert assembly_policy["bundle_description"] == bundle["description"]
+    assert assembly_policy["target_phase"] == "phase9"

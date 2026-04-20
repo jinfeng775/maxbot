@@ -5,9 +5,9 @@ def test_quality_gate_profiles_are_stable():
     standard = get_quality_gate_policy("standard")
     relaxed = get_quality_gate_policy("relaxed")
 
-    assert strict["min_pass_rate"] >= standard["min_pass_rate"] >= relaxed["min_pass_rate"]
-    assert strict["min_avg_score"] >= standard["min_avg_score"] >= relaxed["min_avg_score"]
-    assert strict["max_execution_failures"] <= standard["max_execution_failures"] <= relaxed["max_execution_failures"]
+    assert strict["thresholds"]["min_pass_rate"] >= standard["thresholds"]["min_pass_rate"] >= relaxed["thresholds"]["min_pass_rate"]
+    assert strict["thresholds"]["min_avg_score"] >= standard["thresholds"]["min_avg_score"] >= relaxed["thresholds"]["min_avg_score"]
+    assert strict["thresholds"]["max_execution_failures"] <= standard["thresholds"]["max_execution_failures"] <= relaxed["thresholds"]["max_execution_failures"]
 
 
 
@@ -360,3 +360,60 @@ def test_quality_gate_supports_named_policy_bundle_with_advisory_mode(tmp_path):
     assert gate["blocking_summary"]["blocking"] is True
     assert gate["blocking_summary"]["primary_reason"] == "avg_score"
     assert gate["advisories"] == ["exact_match_normalized", "keyword_coverage"]
+
+
+
+def test_quality_gate_lists_named_policy_bundles_and_emits_advisory_summary(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+    from maxbot.evals.grader import get_quality_gate_policy, list_quality_gate_policies
+
+    policies = list_quality_gate_policies()
+    assert "release_blocker" in policies
+    assert "advisory" in policies
+
+    release_blocker = get_quality_gate_policy("release_blocker")
+    assert release_blocker["mode"] == "blocking"
+    assert release_blocker["description"]
+    assert release_blocker["thresholds"]["min_tasks_total"] == 2
+
+    advisory = get_quality_gate_policy("advisory")
+    assert advisory["mode"] == "advisory"
+    assert advisory["thresholds"]["min_pass_rate"] == 0.0
+
+    suite = {
+        "suite_id": "suite-gate-policy-bundle",
+        "suite_name": "phase9-gate-policy-bundle",
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请给出 release quality 状态",
+                "expected_output": "phase9 ready",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.5},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["phase9", "ready"],
+                            "weight": 0.5,
+                        },
+                    ],
+                    "min_composite_score": 0.8,
+                },
+            }
+        ],
+    }
+
+    runner = BenchmarkRunner()
+    report = runner.run_suite(
+        suite=suite,
+        outputs={"task-1": "phase9 only"},
+        policy="advisory",
+        persist=False,
+    )
+
+    gate = report["gate"]
+    assert gate["operating_mode"] == "advisory"
+    assert gate["passed"] is True
+    assert gate["blocking_summary"]["blocking"] is False
+    assert gate["advisory_summary"]["has_advisories"] is True
+    assert gate["policy_description"] == advisory["description"]

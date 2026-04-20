@@ -1,8 +1,8 @@
 # MaxBot 进化计划进度追踪
 
 **最后更新：** 2026-04-19  
-**当前阶段：** Phase 1~7 主线已完成，Phase 8 已完成 suite/gate bundles 在内的十二个核心切片并持续实施中  
-**整体进度：** 约 74%（7/12 个阶段已完成，Phase 8 约 76%）
+**当前阶段：** Phase 1~7 主线已完成，Phase 8 已完成封板准备，Phase 9 首批 gate bundle / advisory 联动已进入实施中  
+**整体进度：** 约 75%（7/12 个阶段已完成，Phase 8 已封板准备完成，Phase 9 已启动）
 
 ---
 
@@ -16,8 +16,8 @@ Phase 4:  ████████████████████ 100% ✅ 
 Phase 5:  ████████████████████ 100% ✅ 安全扫描主链/质量门/工具入口已收口
 Phase 6:  ████████████████████ 100% ✅ runtime 主链/legacy 兼容层/工具契约已收口
 Phase 7:  ████████████████████ 100% ✅ compact hooks / profile / 阻断路径已收口
-Phase 8:  ███████████████░░░░░  76% 🟡 实施中
-Phase 9:  ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
+Phase 8:  ████████████████░░░░  80% 🟡 收官中
+Phase 9:  ███░░░░░░░░░░░░░░░░   15% 🟡 启动中
 Phase 10: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 11: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
 Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 待开始
@@ -332,14 +332,14 @@ python3 -m pytest \
 - 阶段验证：`python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 
 ### 第八阶段：监控和分析
-- **状态：** 🟡 实施中（Reflection runtime、runtime metrics/trace/eval sample、promotion policy、benchmark registry / grader / runner / report store、suite enrichment、richer grading policy、quality gate profile / report comparison / trend summary、composable grading / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights、suite auto-assembly / gate operating modes / advisory blocking summary、suite policy bundle / reusable gate policy profile groundwork 十二条主线已完成最小落地，并继续向更正式的质量门运营层推进）
-- 现状：已明确将 Phase 8 定义为“部署态进化基础设施阶段”，当前十二条主线为 reflection runtime、metrics/trace、eval sample、memory/instinct/skill promotion policy、benchmark registry / grader groundwork、benchmark runner / report store / runtime quality gate integration、suite enrichment / richer grader policy / quality gate closure、quality gate profile / report comparison / trend summary、composable grading policy / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights、suite auto-assembly / gate operating modes / advisory blocking summary、suite policy bundle / reusable gate policy profile groundwork
+- **状态：** 🟡 收官中（Reflection runtime、runtime metrics/trace/eval sample、promotion policy、benchmark registry / grader / runner / report store、suite enrichment、richer grading policy、quality gate profile / report comparison / trend summary、composable grading / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights、suite auto-assembly / gate operating modes / advisory blocking summary、suite policy bundle / reusable gate policy profile groundwork 十二条主线已完成最小落地，当前转入 Phase 8 封板与 Phase 9 启动准备）
+- 现状：Phase 8 当前应按“部署态进化基础设施已基本成型、正在封板”来追踪；后续 named suite strategy set、named gate bundles、blocking/advisory 联动等更运营化内容，建议正式记入 Phase 9。
 - 当前已完成：`maxbot/reflection/*`、`maxbot/evals/*`（含 `metrics.py`、`trace_store.py`、`sample_store.py`、`benchmark_registry.py`、`grader.py`、`benchmark_runner.py`、`report_store.py`）、`maxbot/learning/promotion_policy.py`、`maxbot/knowledge/skill_distiller.py`、AgentConfig / YAML / config_loader 的 reflection + metrics + eval sample 配置接入、`tests/test_phase8_reflection_policy.py` + `tests/test_phase8_reflection_loop.py`（`10 passed`）、`tests/test_phase8_metrics_pipeline.py` + `tests/test_phase8_trace_store.py`（`7 passed`）、`tests/test_phase8_eval_sample_store.py` + `tests/test_phase8_eval_sample_config.py` + eval sample 导出专项（`6 passed`）、`tests/test_phase8_benchmark_registry.py` / `tests/test_phase8_grader.py` / `tests/test_phase8_benchmark_runner.py`（合计 `21 passed`，已覆盖 suite bundle / auto-assembly / selection policy / coverage summary / gate operating fields）、`tests/test_phase8_report_profiles.py`（已扩至 `8 passed`，含 report diff、trend summary、latest profile、多报告 rule summary 聚合、changed rules、自定义 gate policy bundle 语义）以及 Phase 8 promotion 测试（`7 passed`）
 - 计划文档：`docs/phase8-reflection-memory-plan.md`
 
 ### 第九阶段：测试和质量保证
-- **状态：** ⏳ 待开始
-- 现状：已有分阶段测试，但尚未形成统一质量门与覆盖率提升工程
+- **状态：** 🟡 实施中（首批 named gate bundles / advisory_summary / policy listing 已落地）
+- 现状：当前已在 `maxbot/evals/grader.py` 中引入 richer quality gate profile 结构（含 `description`、`mode`、`thresholds`）、`list_quality_gate_policies()`、`advisory_summary` 与 `policy_description`；Phase 9 已从“启动准备”进入第一批代码实现阶段。
 
 ### 第十阶段：文档和培训
 - **状态：** ⏳ 待开始
@@ -388,7 +388,9 @@ python3 -m pytest \
 10. ✅ suite selection policy / coverage summary / report-level operational highlights 已补齐（`tests/test_phase8_benchmark_registry.py` + `tests/test_phase8_report_profiles.py` 新增切片已收口）
 11. ✅ suite auto-assembly / gate operating modes / advisory blocking summary 已补齐（`tests/test_phase8_benchmark_registry.py` + `tests/test_phase8_report_profiles.py` 新增切片已收口）
 12. ✅ suite policy bundle / reusable gate policy profile groundwork 已补齐（`tests/test_phase8_benchmark_registry.py` + `tests/test_phase8_report_profiles.py` 新增切片已收口）
-13. 继续以 `docs/phase8-reflection-memory-plan.md` 为执行计划，向 Phase 9 的更正式 gate policy bundle 与 suite 运营策略集推进
+13. ✅ Phase 8 已达到“基础设施封板前”状态（reflection / metrics / eval sample / benchmark / report / suite/gate bundle groundwork 已齐备）
+14. ✅ 已新建 `docs/phase9-quality-program-plan.md`，并完成 Phase 9 首批 gate policy bundle / advisory_summary / policy listing 落地
+15. 下一步继续沿 `docs/phase9-quality-program-plan.md` 推进：补齐 richer named suite strategy set、release_blocker 语义与 blocking/advisory/report 联动
 
 ### P1：继续收口历史文档与仓库卫生
 
@@ -427,9 +429,9 @@ python3 -m pytest \
 - `python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`
 - Phase 4~7 宽回归切片 → `135 passed`
 - Phase 8 reflection / metrics / trace / eval sample / promotion 回归切片 + config defaults → `32 passed`
-- Phase 8 benchmark registry / grader groundwork + richer grading policy / suite enrichment + auto-assembly + suite bundle → `15 passed`
-- Phase 8 benchmark runner / report store / executor fail-closed + report summary highlights + gate operating fields → `21 passed`
-- Phase 8 quality gate profiles / report comparison / trend summary + composable grading / rule breakdown / multi-report aggregation + suite selection policy + custom gate policy bundle → `15 passed`
+- Phase 8 benchmark registry / grader groundwork + richer grading policy / suite enrichment + auto-assembly + suite bundle → `17 passed`
+- Phase 8 benchmark runner / report store / executor fail-closed + report summary highlights + gate operating fields → `23 passed`
+- Phase 8/9 quality gate profiles / report comparison / trend summary + composable grading / rule breakdown / multi-report aggregation + suite selection policy + named gate bundles → `17 passed`
 
 ### 相关文档
 
@@ -443,5 +445,5 @@ python3 -m pytest \
 
 **进度更新：** ✅ 已更新  
 **最后更新：** 2026-04-19  
-**当前状态：** ✅ Phase 1~7 主线可按已完成追踪；🟡 Phase 8 已完成 reflection、metrics/trace、eval sample、benchmark/grader/runner/report store、suite enrichment / richer grading policy、quality gate profile / report comparison / trend summary、composable grading / rule-level breakdown / multi-report aggregation、suite selection policy / coverage summary / report-level operational highlights、suite auto-assembly / gate operating modes / advisory blocking summary、suite policy bundle / reusable gate policy profile groundwork、promotion policy 十二个基础切片并继续实施中；历史 Phase 1~7 文档口径已完成第一轮收口  
-**当前回答：** 本轮继续推进了 Phase 8：已补齐 named suite policy bundle、`get_suite_policy_bundle()`、`auto_assemble_suite_from_bundle()`，并把 gate policy bundle 基础继续往前推到可复用 profile groundwork；下一步应继续做更正式的 policy bundle 分层与 advisory/blocking 联动策略。
+**当前状态：** 🟡 Phase 8 基础设施层已完成封板准备；🟡 Phase 9 质量计划运营层首批能力（named gate bundles / advisory_summary / policy listing）已落地；历史 Phase 1~7 文档口径已完成第一轮收口  
+**当前回答：** 本轮已正式按 Phase 9 口径推进，落地了 richer gate profile 结构、`list_quality_gate_policies()`、`release_blocker` / `advisory` 等命名质量门，以及 `advisory_summary` / `policy_description` 字段；下一步继续做 richer named suite strategy set 与 blocking/advisory/report 联动。
