@@ -252,3 +252,46 @@ def test_benchmark_registry_auto_assembles_suite_from_multiple_sample_filters(tm
     assert suite["metadata"]["assembly_policy"]["policies_count"] == 2
     assert suite["metadata"]["assembly_policy"]["deduplicated_tasks"] == 2
     assert suite["metadata"]["coverage_summary"]["tasks_total"] == 2
+
+
+
+def test_benchmark_registry_supports_named_suite_policy_bundle(tmp_path):
+    from maxbot.evals.benchmark_registry import BenchmarkRegistry, get_suite_policy_bundle
+
+    sample_store = EvalSampleStore(tmp_path / "eval-samples")
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-b1",
+            "task_id": "task-b1",
+            "user_message": "请分析 reflection runtime",
+            "final_output": "reflection runtime 分析完成",
+            "success": True,
+        },
+        labels=["analysis", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-b2",
+            "task_id": "task-b2",
+            "user_message": "请总结 report trend",
+            "final_output": "report trend 总结完成",
+            "success": True,
+        },
+        labels=["summary", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+
+    registry = BenchmarkRegistry(tmp_path / "benchmark-suites")
+    suite_id = registry.auto_assemble_suite_from_bundle(
+        suite_name="phase8-core-suite",
+        sample_store=sample_store,
+        bundle_name="phase8_core",
+        metadata={"phase": "phase8"},
+    )
+
+    suite = registry.read_suite(suite_id)
+    bundle = get_suite_policy_bundle("phase8_core")
+    assert suite["metadata"]["assembly_policy"]["bundle_name"] == "phase8_core"
+    assert suite["metadata"]["assembly_policy"]["policies_count"] == len(bundle)
+    assert len(suite["tasks"]) == 2

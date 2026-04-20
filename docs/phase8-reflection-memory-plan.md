@@ -674,6 +674,48 @@ Expected: PASS
 - ✅ quality gate 已返回 `operating_mode` / `blocking_summary` / `advisories`
 - ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q` → `19 passed`
 
+### Task B12: 补 suite policy bundle 与可复用 gate policy groundwork
+
+**Objective:** 在已有 auto-assembly 与 gate operating fields 基础上，继续向 Phase 9 入口推进：让 suite 有命名策略集可复用，并把 gate profile 往 policy bundle 方向再铺一层基础能力。
+
+**Files:**
+- Modify: `maxbot/evals/benchmark_registry.py`
+- Modify: `tests/test_phase8_benchmark_registry.py`
+- Modify: `tests/test_phase8_report_profiles.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `get_suite_policy_bundle(name)`
+- `auto_assemble_suite_from_bundle()`
+- bundle name 会写入 assembly policy metadata
+- gate 自定义 policy 仍保留 `operating_mode=custom` / advisory 字段语义
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py -q
+```
+Expected: FAIL — 还未支持 named suite bundle
+
+**Step 3: Implement minimal bundle layer**
+- 先为 suite 增加内置 bundle registry
+- bundle 先复用现有 selection policies，不引入数据库或 DSL
+- gate 先保持 named profile + custom policy 双路径，避免一次性过度设计
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `get_suite_policy_bundle()` 已落地
+- ✅ `auto_assemble_suite_from_bundle()` 已支持命名策略集复用
+- ✅ suite metadata 已记录 `bundle_name`
+- ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q` → `21 passed`
+
 ---
 
 ## 4. Workstream C：Memory / Instinct / Skill Promotion Policy

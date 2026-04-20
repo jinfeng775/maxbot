@@ -316,3 +316,47 @@ def test_quality_gate_supports_operating_modes_and_runner_emits_advisories(tmp_p
     assert gate["blocking_summary"]["primary_reason"] == "avg_score"
     assert gate["blocking_summary"]["blocking"] is True
     assert gate["advisories"] == ["exact_match_normalized", "keyword_coverage"]
+
+
+
+def test_quality_gate_supports_named_policy_bundle_with_advisory_mode(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+
+    suite = {
+        "suite_id": "suite-gate-bundle",
+        "suite_name": "phase8-gate-bundle",
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请给出 quality gate 状态",
+                "expected_output": "phase8 quality ready",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.4},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["phase8", "quality", "ready"],
+                            "min_keyword_coverage": 2 / 3,
+                            "weight": 0.6,
+                        },
+                    ],
+                    "min_composite_score": 0.5,
+                },
+            }
+        ],
+    }
+
+    runner = BenchmarkRunner()
+    report = runner.run_suite(
+        suite=suite,
+        outputs={"task-1": "phase8 quality only"},
+        policy={"min_tasks_total": 1, "min_pass_rate": 0.0, "min_avg_score": 0.75, "max_execution_failures": 1},
+        persist=False,
+    )
+
+    gate = report["gate"]
+    assert gate["operating_mode"] == "custom"
+    assert gate["passed"] is False
+    assert gate["blocking_summary"]["blocking"] is True
+    assert gate["blocking_summary"]["primary_reason"] == "avg_score"
+    assert gate["advisories"] == ["exact_match_normalized", "keyword_coverage"]

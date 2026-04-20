@@ -4,10 +4,29 @@ import json
 import time
 import uuid
 from collections import Counter, defaultdict
+from copy import deepcopy
 from pathlib import Path
 from typing import Any
 
 from maxbot.evals.sample_store import EvalSampleStore
+
+
+_SUITE_POLICY_BUNDLES: dict[str, list[dict[str, Any]]] = {
+    "phase8_core": [
+        {"labels": ["analysis", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
+        {"labels": ["summary", "phase8"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
+    ],
+    "phase8_runtime_mix": [
+        {"labels": ["analysis"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 2},
+        {"labels": ["summary"], "metadata_filter": {"project": "maxbot", "source": "runtime"}, "limit": 1},
+    ],
+}
+
+
+def get_suite_policy_bundle(name: str) -> list[dict[str, Any]]:
+    if name not in _SUITE_POLICY_BUNDLES:
+        raise ValueError(f"Unknown suite policy bundle: {name}")
+    return deepcopy(_SUITE_POLICY_BUNDLES[name])
 
 
 class BenchmarkRegistry:
@@ -88,6 +107,7 @@ class BenchmarkRegistry:
         sample_store: EvalSampleStore,
         selection_policies: list[dict[str, Any]],
         metadata: dict[str, Any] | None = None,
+        bundle_name: str | None = None,
     ) -> str:
         ordered_samples: list[dict[str, Any]] = []
         seen_task_ids: set[str] = set()
@@ -118,8 +138,10 @@ class BenchmarkRegistry:
         merged_metadata["assembly_policy"] = {
             "policies_count": len(selection_policies),
             "deduplicated_tasks": len(tasks),
-            "selection_policies": selection_policies,
+            "selection_policies": deepcopy(selection_policies),
         }
+        if bundle_name:
+            merged_metadata["assembly_policy"]["bundle_name"] = bundle_name
         merged_metadata["coverage_summary"] = self._build_coverage_summary(ordered_samples)
         merged_metadata["source_sample_count"] = len(tasks)
         return self.register_suite(
@@ -127,6 +149,23 @@ class BenchmarkRegistry:
             tasks=tasks,
             source="auto_assembled_eval_samples",
             metadata=merged_metadata,
+        )
+
+    def auto_assemble_suite_from_bundle(
+        self,
+        *,
+        suite_name: str,
+        sample_store: EvalSampleStore,
+        bundle_name: str,
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        selection_policies = get_suite_policy_bundle(bundle_name)
+        return self.auto_assemble_suite(
+            suite_name=suite_name,
+            sample_store=sample_store,
+            selection_policies=selection_policies,
+            metadata=metadata,
+            bundle_name=bundle_name,
         )
 
     def read_suite(self, suite_id: str) -> dict[str, Any]:
