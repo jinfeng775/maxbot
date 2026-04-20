@@ -253,3 +253,66 @@ def test_benchmark_runner_and_report_store_emit_operational_rule_highlights(tmp_
     assert trend["summary"]["weakest_rule"]["rule_type"] == "exact_match_normalized"
     assert trend["summary"]["strongest_rule"]["rule_type"] == "keyword_coverage"
     assert trend["summary"]["changed_rules"] == ["exact_match_normalized", "keyword_coverage"]
+
+
+
+def test_quality_gate_supports_operating_modes_and_runner_emits_advisories(tmp_path):
+    from maxbot.evals.benchmark_runner import BenchmarkRunner
+
+    suite = {
+        "suite_id": "suite-gate-ops",
+        "suite_name": "phase8-gate-ops",
+        "tasks": [
+            {
+                "task_id": "task-1",
+                "prompt": "请给出质量状态",
+                "expected_output": "phase8 quality ready",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.3},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["phase8", "quality", "ready"],
+                            "min_keyword_coverage": 2 / 3,
+                            "weight": 0.7,
+                        },
+                    ],
+                    "min_composite_score": 0.6,
+                },
+            },
+            {
+                "task_id": "task-2",
+                "prompt": "请给出 trace 状态",
+                "expected_output": "memory trace stable",
+                "metadata": {
+                    "grading_rules": [
+                        {"type": "exact_match", "normalize_whitespace": True, "weight": 0.4},
+                        {
+                            "type": "keyword_coverage",
+                            "required_keywords": ["memory", "trace"],
+                            "weight": 0.6,
+                        },
+                    ],
+                    "min_composite_score": 0.7,
+                },
+            },
+        ],
+    }
+
+    runner = BenchmarkRunner()
+    report = runner.run_suite(
+        suite=suite,
+        outputs={
+            "task-1": "phase8 quality ready",
+            "task-2": "memory status only",
+        },
+        policy={"min_tasks_total": 1, "min_pass_rate": 0.0, "min_avg_score": 0.75, "max_execution_failures": 0},
+        persist=False,
+    )
+
+    gate = report["gate"]
+    assert gate["operating_mode"] == "custom"
+    assert gate["blocking_reason"] == "avg_score"
+    assert gate["blocking_summary"]["primary_reason"] == "avg_score"
+    assert gate["blocking_summary"]["blocking"] is True
+    assert gate["advisories"] == ["exact_match_normalized", "keyword_coverage"]

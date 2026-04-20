@@ -629,6 +629,51 @@ Expected: PASS
 - ✅ report/trend 已可输出 `weakest_rule` / `strongest_rule`
 - ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q` → `17 passed`
 
+### Task B11: 补 suite auto-assembly 与 quality gate operating modes
+
+**Objective:** 在已有 suite selection policy 与 report operational highlights 基础上，继续向 Phase 9 入口推进：支持多策略样本自动组装 suite，并让 quality gate 返回更明确的 operating mode / blocking summary / advisory 字段。
+
+**Files:**
+- Modify: `maxbot/evals/benchmark_registry.py`
+- Modify: `maxbot/evals/grader.py`
+- Modify: `tests/test_phase8_benchmark_registry.py`
+- Modify: `tests/test_phase8_report_profiles.py`
+- Modify: `docs/phase8-reflection-memory-plan.md`
+
+**Step 1: Write failing tests**
+至少覆盖：
+- `auto_assemble_suite()` 基于多条 selection policy 组装 suite
+- suite metadata 记录 assembly policy / dedup 结果
+- quality gate 返回 `operating_mode`
+- quality gate 返回 `blocking_summary`
+- quality gate 返回 `advisories`
+
+**Step 2: Run tests to verify failure**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py -q
+```
+Expected: FAIL — 还未支持 auto-assembly 与 gate operating fields
+
+**Step 3: Implement minimal operating layer**
+- auto assembly 先复用 sample filtering，不引入复杂调度器
+- assembly metadata 先记录 policy 数量与去重结果
+- gate operating fields 先基于现有 blocking reason / rule summary 生成
+- advisory 输出保持 deterministic，不做 LLM 解释
+
+**Step 4: Run tests to verify pass**
+Run:
+```bash
+python3 -m pytest tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q
+```
+Expected: PASS
+
+**当前收口状态（2026-04-19）**
+- ✅ `BenchmarkRegistry.auto_assemble_suite()` 已支持多 selection policy 自动组装
+- ✅ suite metadata 已记录 `assembly_policy`
+- ✅ quality gate 已返回 `operating_mode` / `blocking_summary` / `advisories`
+- ✅ 当前专项结果：`tests/test_phase8_benchmark_registry.py tests/test_phase8_report_profiles.py tests/test_phase8_benchmark_runner.py -q` → `19 passed`
+
 ---
 
 ## 4. Workstream C：Memory / Instinct / Skill Promotion Policy

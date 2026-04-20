@@ -81,6 +81,54 @@ class BenchmarkRegistry:
             metadata=merged_metadata,
         )
 
+    def auto_assemble_suite(
+        self,
+        *,
+        suite_name: str,
+        sample_store: EvalSampleStore,
+        selection_policies: list[dict[str, Any]],
+        metadata: dict[str, Any] | None = None,
+    ) -> str:
+        ordered_samples: list[dict[str, Any]] = []
+        seen_task_ids: set[str] = set()
+        for policy in selection_policies:
+            samples = sample_store.list_recent(
+                limit=int(policy.get("limit", 10)),
+                labels=policy.get("labels"),
+                metadata_filter=policy.get("metadata_filter"),
+            )
+            for sample in samples:
+                task_id = sample.get("task_id") or sample.get("sample_id")
+                if task_id in seen_task_ids:
+                    continue
+                seen_task_ids.add(task_id)
+                ordered_samples.append(sample)
+
+        tasks = [
+            {
+                "task_id": sample.get("task_id") or sample["sample_id"],
+                "prompt": sample.get("prompt", ""),
+                "expected_output": sample.get("response", ""),
+                "trace_id": sample.get("trace_id"),
+                "metadata": dict(sample.get("metadata") or {}),
+            }
+            for sample in ordered_samples
+        ]
+        merged_metadata = dict(metadata or {})
+        merged_metadata["assembly_policy"] = {
+            "policies_count": len(selection_policies),
+            "deduplicated_tasks": len(tasks),
+            "selection_policies": selection_policies,
+        }
+        merged_metadata["coverage_summary"] = self._build_coverage_summary(ordered_samples)
+        merged_metadata["source_sample_count"] = len(tasks)
+        return self.register_suite(
+            suite_name=suite_name,
+            tasks=tasks,
+            source="auto_assembled_eval_samples",
+            metadata=merged_metadata,
+        )
+
     def read_suite(self, suite_id: str) -> dict[str, Any]:
         path = self.base_dir / f"{suite_id}.json"
         return json.loads(path.read_text(encoding="utf-8"))

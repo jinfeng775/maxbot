@@ -195,3 +195,60 @@ def test_benchmark_registry_build_task_set_supports_suite_metadata_filter(tmp_pa
     task_set = registry.build_task_set(limit=10, suite_metadata_filter={"phase": "phase8"})
 
     assert task_set == [{"task_id": "task-phase8", "prompt": "P8", "expected_output": "OK", "trace_id": "trace-p8", "metadata": {}}]
+
+
+
+def test_benchmark_registry_auto_assembles_suite_from_multiple_sample_filters(tmp_path):
+    from maxbot.evals.benchmark_registry import BenchmarkRegistry
+
+    sample_store = EvalSampleStore(tmp_path / "eval-samples")
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-a1",
+            "task_id": "task-a1",
+            "user_message": "请分析 phase8 质量门",
+            "final_output": "phase8 质量门分析完成",
+            "success": True,
+        },
+        labels=["analysis", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-a2",
+            "task_id": "task-a2",
+            "user_message": "请总结 trace pipeline",
+            "final_output": "trace pipeline 总结完成",
+            "success": True,
+        },
+        labels=["summary", "phase8"],
+        metadata={"project": "maxbot", "source": "runtime"},
+    )
+    sample_store.promote_trace(
+        {
+            "trace_id": "trace-a3",
+            "task_id": "task-a3",
+            "user_message": "请分析 phase9 plan",
+            "final_output": "phase9 规划分析完成",
+            "success": True,
+        },
+        labels=["analysis", "phase9"],
+        metadata={"project": "maxbot", "source": "imported"},
+    )
+
+    registry = BenchmarkRegistry(tmp_path / "benchmark-suites")
+    suite_id = registry.auto_assemble_suite(
+        suite_name="phase8-auto-suite",
+        sample_store=sample_store,
+        selection_policies=[
+            {"labels": ["analysis"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
+            {"labels": ["summary"], "metadata_filter": {"project": "maxbot"}, "limit": 1},
+        ],
+        metadata={"phase": "phase8"},
+    )
+
+    suite = registry.read_suite(suite_id)
+    assert [task["task_id"] for task in suite["tasks"]] == ["task-a3", "task-a2"]
+    assert suite["metadata"]["assembly_policy"]["policies_count"] == 2
+    assert suite["metadata"]["assembly_policy"]["deduplicated_tasks"] == 2
+    assert suite["metadata"]["coverage_summary"]["tasks_total"] == 2

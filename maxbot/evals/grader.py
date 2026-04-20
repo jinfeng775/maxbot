@@ -254,4 +254,10 @@ def evaluate_benchmark_quality_gate(
         "execution_failures": execution_failures,
         "policy": dict(policy),
         "profile": policy_name,
+        "operating_mode": policy_name or "custom",
+        "blocking_summary": {
+            "blocking": blocking_reason is not None,
+            "primary_reason": blocking_reason,
+        },
+        "advisories": list((report.get("rule_summary") or {}).keys()),
     }
