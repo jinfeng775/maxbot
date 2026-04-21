@@ -1360,6 +1360,30 @@ class Agent:
         logger.info(f"开启新会话: {old_session_id} -> {self.config.session_id}")
         return self.config.session_id
 
+    def resume_session(self, session_id: str) -> bool:
+        """恢复指定历史会话，切换前先保存/归档当前会话。"""
+        if not self.config.session_store or not session_id:
+            return False
+
+        target = self.config.session_store.get(session_id)
+        if target is None:
+            logger.warning(f"恢复会话失败，未找到 session: {session_id}")
+            return False
+
+        current_session_id = self.config.session_id
+        current_messages = [msg.to_dict() for msg in self._message_manager.get_messages()]
+        if current_session_id and current_session_id != session_id and current_messages:
+            self.save_session()
+            self._archive_session_to_mempalace(current_session_id, current_messages)
+
+        self._trigger_hook(HookEvent.SESSION_END)
+        self.config.session_id = session_id
+        self.messages = []
+        self._conversation_turns = 0
+        self._load_session()
+        logger.info(f"恢复历史会话: {current_session_id} -> {session_id}")
+        return True
+
     def list_sessions(self) -> list[dict[str, Any]]:
         if not self.config.session_store:
             return []

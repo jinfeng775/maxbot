@@ -85,6 +85,13 @@
   - 只清空当前运行时上下文
   - 保留当前 `session_id`
   - 保留 `SessionStore` 中的会话历史
+- `/sessions`
+  - 列出最近历史会话
+  - 展示 `session_id / title / updated_at`
+- `/resume <session_id>`
+  - 切换到指定历史会话
+  - 切换前先保存当前会话
+  - 若开启 `MemPalace`，切换前也会归档当前会话
 
 这与 Hermes 的“fresh session ID + preserve history”语义对齐，而不是过去那种 `/new` 直接删除当前 session 的行为。
 

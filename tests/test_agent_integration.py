@@ -462,3 +462,71 @@ class TestSessionPersistence:
             saved_after_reset = store.get(current_session_id)
             assert saved_after_reset is not None
             assert len(saved_after_reset.messages) == 2
+
+    def test_resume_session_loads_previous_messages(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+            store.create("s1", title="旧会话")
+            store.save_messages("s1", [{"role": "user", "content": "旧消息"}, {"role": "assistant", "content": "旧回复"}])
+            store.create("s2", title="当前会话")
+            store.save_messages("s2", [{"role": "user", "content": "当前消息"}])
+
+            config = AgentConfig(
+                api_key="test-key",
+                memory_enabled=False,
+                session_id="s2",
+                auto_save=True,
+                skills_enabled=False,
+            )
+            agent = Agent(config=config, session_store=store)
+
+            assert agent.resume_session("s1") is True
+            assert agent.config.session_id == "s1"
+            assert len(agent.get_messages()) == 2
+            assert agent.get_messages()[0].content == "旧消息"
+
+    def test_resume_session_saves_current_session_before_switch(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+            store.create("target-session", title="目标")
+            store.save_messages("target-session", [{"role": "user", "content": "目标消息"}])
+
+            config = AgentConfig(
+                api_key="test-key",
+                memory_enabled=False,
+                session_id="active-session",
+                auto_save=True,
+                skills_enabled=False,
+            )
+            agent = Agent(config=config, session_store=store)
+            agent.messages = [
+                Message(role="user", content="切换前消息"),
+                Message(role="assistant", content="切换前回复"),
+            ]
+
+            assert agent.resume_session("target-session") is True
+            saved_active = store.get("active-session")
+            assert saved_active is not None
+            assert len(saved_active.messages) == 2
+            assert saved_active.messages[0]["content"] == "切换前消息"
+
+    def test_list_sessions_returns_recent_sessions_for_cli(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+            store.create("recent-1", title="最近 1")
+            store.save_messages("recent-1", [{"role": "user", "content": "a"}])
+            store.create("recent-2", title="最近 2")
+            store.save_messages("recent-2", [{"role": "user", "content": "b"}])
+
+            config = AgentConfig(memory_enabled=False, session_id="recent-1")
+            agent = Agent(config=config, session_store=store)
+            sessions = agent.list_sessions()
+
+            assert len(sessions) >= 2
+            assert all("session_id" in session for session in sessions)
+            assert all("title" in session for session in sessions)
+            assert all("created_at" in session for session in sessions)
+            assert all("updated_at" in session for session in sessions)

@@ -96,14 +96,16 @@ def main():
         if user_input == "/help":
             print("""
   命令列表:
-    /help          显示此帮助
-    /new           开启新会话
-    /tools         列出所有可用工具
-    /reset         重置对话历史
-    /stats         显示会话统计
-    /history       显示对话历史摘要
-    /model <name>  切换模型
-    /quit          退出
+    /help            显示此帮助
+    /new             开启新会话
+    /reset           重置当前上下文（保留历史）
+    /sessions        列出历史会话
+    /resume <id>     恢复指定历史会话
+    /tools           列出所有可用工具
+    /stats           显示会话统计
+    /history         显示对话历史摘要
+    /model <name>    切换模型
+    /quit            退出
             """)
             continue
 
@@ -124,6 +126,26 @@ def main():
         if user_input == "/reset":
             agent.reset()
             print("  🔄 当前上下文已重置（会话历史仍保留）\n")
+            continue
+
+        if user_input == "/sessions":
+            sessions = agent.list_sessions()
+            print(f"\n  📚 历史会话 ({len(sessions)} 个):")
+            for idx, session in enumerate(sessions[:20], 1):
+                title = session.get("title") or "(无标题)"
+                print(f"    {idx}. {session['session_id']} | {title} | updated={session['updated_at']}")
+            print()
+            continue
+
+        if user_input.startswith("/resume "):
+            target_session_id = user_input[8:].strip()
+            if not target_session_id:
+                print("  ⚠️ 用法: /resume <session_id>\n")
+                continue
+            if agent.resume_session(target_session_id):
+                print(f"  ♻️ 已恢复会话 {target_session_id}\n")
+            else:
+                print(f"  ⚠️ 未找到会话 {target_session_id}\n")
             continue
 
         if user_input == "/stats":
