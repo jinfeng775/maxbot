@@ -74,6 +74,58 @@ def test_agent_default_skill_path_injects_builtin_skill_content(monkeypatch, tmp
     assert "tdd-workflow" in prompt
 
 
+def test_agent_dynamic_capability_summary_groups_enabled_disabled_and_phase_capabilities(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    for name, description, toolset, required_param in [
+        ("read_file", "读取文件", "file", "path"),
+        ("web_search", "搜索网页", "web", "query"),
+        ("security_scan", "执行安全扫描", "security", "check_name"),
+        ("spawn_agent", "派生单个子 Agent", "multi_agent", "task"),
+        ("spawn_agents_parallel", "并行派生多个子 Agent", "multi_agent", "tasks"),
+        ("agent_status", "查看子 Agent 状态", "multi_agent", "status"),
+    ]:
+        registry.register(
+            name=name,
+            description=description,
+            parameters={required_param: {"type": "string"}},
+            handler=lambda **kwargs: kwargs,
+            toolset=toolset,
+            required_params=[required_param],
+        )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=True,
+            skills_dir="~/.maxbot/skills",
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=False,
+            eval_samples_enabled=False,
+            metrics_enabled=True,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "当前已启用能力" in summary
+    assert "已实现但默认未启用的能力" in summary
+    assert "按进化路线形成的高阶能力" in summary
+    assert "多 Agent 协作" in summary
+    assert "Reflection" in summary
+    assert "MemPalace" in summary
+    assert "Phase 3 持续学习闭环" in summary
+    assert "Phase 6 多 Agent 协作" in summary
+    assert "Phase 8 反思、指标与评测基础设施" in summary
+    assert "Phase 9 质量计划运营层" in summary
+    assert "自我进化" in summary
+
+
 def test_agent_dynamic_capability_summary_lists_runtime_tools_and_skills(monkeypatch, tmp_path):
     _patch_home(monkeypatch, tmp_path)
     monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
