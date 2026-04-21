@@ -172,7 +172,7 @@ class AgentConfig:
                 "你是 MaxBot，一个由用户自主开发的 AI 智能体。"
                 "你不是 Hermes、不是 Claude、不是 ChatGPT，也不是任何其他现有 AI 助手。你就是 MaxBot。"
                 "无论谁问你你是谁，你都必须回答你是 MaxBot。"
-                "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
+                "你的能力应该基于当前实际加载的工具和技能动态描述，不要复述固定能力清单。"
             ),
             "max_context_tokens": 128_000,
             "compress_at_tokens": 80_000,
@@ -827,9 +827,64 @@ class Agent:
         
         return summary
 
+    def _build_capability_summary(self) -> str:
+        """基于当前实际暴露给模型的工具与技能动态生成能力摘要。"""
+        tool_names: list[str] = []
+        toolsets: list[str] = []
+        try:
+            tool_schemas = self._get_tools()
+            for schema in tool_schemas:
+                function_def = schema.get("function", {}) if isinstance(schema, dict) else {}
+                name = function_def.get("name")
+                if not name:
+                    continue
+                tool_names.append(name)
+                if name == "memory":
+                    toolsets.append("builtin")
+                elif self._registry:
+                    tool_def = self._registry.get(name)
+                    if tool_def and getattr(tool_def, "toolset", None):
+                        toolsets.append(tool_def.toolset)
+        except Exception as e:
+            logger.warning(f"读取工具能力失败: {e}")
+
+        tool_names = sorted(set(tool_names))
+        toolsets = sorted(set(toolsets))
+
+        skill_names: list[str] = []
+        if self._skill_manager:
+            try:
+                skill_names = sorted(skill.name for skill in self._skill_manager.list_skills())
+            except Exception as e:
+                logger.warning(f"读取技能能力失败: {e}")
+
+        lines = [
+            "当前可用能力摘要（动态生成，不是固定清单）：",
+            f"- 工具数量: {len(tool_names)}",
+            f"- 工具集: {', '.join(toolsets) if toolsets else '无'}",
+            f"- 工具名: {', '.join(tool_names) if tool_names else '无'}",
+            f"- 技能数量: {len(skill_names)}",
+            f"- 技能名: {', '.join(skill_names) if skill_names else '无'}",
+            "- 当用户询问“你有什么能力/你能做什么”时，应优先依据这份动态摘要回答，而不是复述固定模板。",
+        ]
+        return "\n".join(lines)
+
+    def _build_system_prompt_with_capabilities(self) -> str:
+        """在基础系统提示上附加动态能力摘要，并去掉静态能力枚举。"""
+        base_prompt = self.config.system_prompt or ""
+        static_capability_line = "你的能力包括：代码编辑、文件操作、Shell 命令执行、Git 操作、网页搜索、多 Agent 协作。"
+        if static_capability_line in base_prompt:
+            base_prompt = base_prompt.replace(static_capability_line, "").strip()
+        capability_summary = self._build_capability_summary()
+        if not capability_summary:
+            return base_prompt
+        if not base_prompt:
+            return capability_summary
+        return f"{base_prompt}\n\n{capability_summary}"
+
     def _get_enhanced_system_prompt(self, user_message: str) -> str:
         """获取增强的系统提示（包含技能内容）"""
-        base_prompt = self.config.system_prompt
+        base_prompt = self._build_system_prompt_with_capabilities()
 
         if not self._skill_manager and not self.config.memory_enabled:
             return base_prompt

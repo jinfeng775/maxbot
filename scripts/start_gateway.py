@@ -26,7 +26,7 @@ from fastapi import FastAPI, Request
 
 from maxbot.core import Agent, AgentConfig
 from maxbot.tools import registry
-from maxbot.gateway.server import MaxBotGateway, GatewayConfig, app
+from maxbot.gateway.server import MaxBotGateway, GatewayConfig
 from maxbot.gateway.channels.base import InboundMessage, OutboundMessage, MessageType
 
 
@@ -66,6 +66,7 @@ def main():
         agent_config=agent_config,
     )
     server = MaxBotGateway(config=config)
+    app = server.app
 
     # 飞书集成
     feishu = None
