@@ -476,11 +476,32 @@ class Agent:
             )
             existing = self.config.session_store.get(self.config.session_id)
 
+        messages = [msg.to_api() for msg in self._message_manager.get_messages()]
         self.config.session_store.save_messages(
             self.config.session_id,
-            [msg.to_api() for msg in self._message_manager.get_messages()],
+            messages,
             metadata=self._build_session_metadata(existing),
         )
+
+        # 同步到 MemPalace
+        if self.config.mempalace_enabled:
+            try:
+                from maxbot.memory import MemPalaceAdapter
+
+                adapter = MemPalaceAdapter(self.config.mempalace_path)
+                if adapter.is_available():
+                    # 获取 wing 和 room
+                    session_meta = self._build_session_metadata(existing)
+                    wing = self.config.mempalace_wing or session_meta.get("project_id", "conversations")
+                    room = session_meta.get("user_id", "general")
+
+                    # 存储会话到 MemPalace
+                    success = adapter.store_session(messages, self.config.session_id, wing=wing, room=room)
+                    if success:
+                        logger.info(f"会话已同步到 MemPalace: {self.config.session_id}")
+            except Exception as e:
+                logger.warning(f"同步到 MemPalace 失败: {e}")
+
         return True
 
     def _derive_session_title(self) -> str:
@@ -827,8 +848,8 @@ class Agent:
         
         return summary
 
-    def _build_capability_summary(self) -> str:
-        """基于当前实际暴露给模型的工具与技能动态生成能力摘要。"""
+    def _collect_runtime_inventory(self) -> tuple[list[str], list[str], list[str]]:
+        """收集当前运行时真正暴露给模型的工具、工具集与技能。"""
         tool_names: list[str] = []
         toolsets: list[str] = []
         try:
@@ -848,9 +869,6 @@ class Agent:
         except Exception as e:
             logger.warning(f"读取工具能力失败: {e}")
 
-        tool_names = sorted(set(tool_names))
-        toolsets = sorted(set(toolsets))
-
         skill_names: list[str] = []
         if self._skill_manager:
             try:
@@ -858,15 +876,120 @@ class Agent:
             except Exception as e:
                 logger.warning(f"读取技能能力失败: {e}")
 
-        lines = [
-            "当前可用能力摘要（动态生成，不是固定清单）：",
+        return sorted(set(tool_names)), sorted(set(toolsets)), skill_names
+
+    @staticmethod
+    def _format_capability_section(title: str, items: list[str]) -> list[str]:
+        lines = [f"{title}："]
+        if not items:
+            lines.append("- 暂无")
+            return lines
+        lines.extend(f"- {item}" for item in items)
+        return lines
+
+    def _build_capability_summary(self) -> str:
+        """基于当前实际暴露给模型的工具、配置与阶段能力动态生成能力摘要。"""
+        tool_names, toolsets, skill_names = self._collect_runtime_inventory()
+        tool_name_set = set(tool_names)
+        repo_root = Path(__file__).resolve().parents[1]
+
+        enabled_capabilities: list[str] = []
+        engineering_parts: list[str] = []
+        if tool_name_set & {"read_file", "write_file", "search_files", "list_files", "patch_file"}:
+            engineering_parts.append("文件操作")
+        if tool_name_set & {"code_edit", "code_edit_multi", "code_create", "undo_edit"}:
+            engineering_parts.append("代码编辑")
+        if tool_name_set & {"execute_code", "exec_python", "shell"}:
+            engineering_parts.append("命令执行")
+        if tool_name_set & {"git_status", "git_diff", "git_log", "git_commit", "git_branch"}:
+            engineering_parts.append("Git")
+        if tool_name_set & {
+            "analyze_code", "analyze_project", "analyze_python", "get_function",
+            "notebook_read", "notebook_edit_cell", "notebook_insert_cell", "notebook_delete_cell",
+        }:
+            engineering_parts.append("项目分析")
+        if engineering_parts:
+            enabled_capabilities.append("工程执行：" + "、".join(engineering_parts))
+        web_parts: list[str] = []
+        if "web_search" in tool_name_set:
+            web_parts.append("网页搜索")
+        if "web_fetch" in tool_name_set:
+            web_parts.append("内容抓取")
+        if web_parts:
+            enabled_capabilities.append("外部检索：" + "、".join(web_parts))
+
+        multi_agent_parts: list[str] = []
+        if "spawn_agent" in tool_name_set:
+            multi_agent_parts.append("任务派发")
+        if "spawn_agents_parallel" in tool_name_set:
+            multi_agent_parts.append("并行执行")
+        if "agent_status" in tool_name_set:
+            multi_agent_parts.append("状态汇总")
+        if multi_agent_parts:
+            enabled_capabilities.append("多 Agent 协作：" + "、".join(multi_agent_parts))
+        if "security_scan" in tool_name_set:
+            enabled_capabilities.append("安全验证：安全扫描与质量门结果汇总")
+        if "memory" in tool_name_set:
+            if self.config.memory_enabled:
+                enabled_capabilities.append("记忆系统：memory 工具、分层记忆检索与会话持久化")
+            else:
+                enabled_capabilities.append("记忆工具：可手动读写 memory，自动记忆注入当前关闭")
+        if self.config.reflection_enabled:
+            enabled_capabilities.append("Reflection：当前会话已启用 critique / revise 反思闭环")
+        if self.config.mempalace_enabled:
+            enabled_capabilities.append("MemPalace：当前会话已启用外接长期记忆检索与唤醒")
+        if self.config.eval_samples_enabled:
+            enabled_capabilities.append("Eval Samples：当前会话已启用成功任务评测样本导出")
+        if self._learning_loop is not None:
+            enabled_capabilities.append("持续学习：Hook 驱动的模式观察、验证与 instinct 沉淀")
+        if self.config.metrics_enabled:
+            enabled_capabilities.append("运行时评测基础设施：metrics、trace 与执行统计已开启")
+        if skill_names:
+            enabled_capabilities.append(f"技能系统：已加载 {len(skill_names)} 个技能，可按任务注入流程指南")
+
+        disabled_capabilities: list[str] = []
+        if not self.config.reflection_enabled:
+            disabled_capabilities.append("Reflection：已实现 critique / revise 反思闭环，但当前默认未启用")
+        if not self.config.mempalace_enabled:
+            disabled_capabilities.append("MemPalace：外接长期记忆 PoC 已接入，但当前默认未启用")
+        if not self.config.eval_samples_enabled:
+            disabled_capabilities.append("Eval Samples：成功任务导出为评测样本的链路已实现，但当前默认未启用")
+        if not self.config.memory_enabled:
+            disabled_capabilities.append("自动记忆注入：分层 memory 检索/注入在当前会话关闭，可通过配置重新开启")
+        if not self.config.metrics_enabled:
+            disabled_capabilities.append("Runtime Metrics / Trace：运行时指标与轨迹记录当前关闭")
+
+        evolution_capabilities: list[str] = []
+        if self._learning_loop is not None:
+            evolution_capabilities.append("Phase 3 持续学习闭环：观察 → 模式提取 → 验证 → 存储 → 应用")
+        if self.config.session_store is not None and hasattr(self.config.session_store, "memory"):
+            evolution_capabilities.append("Phase 4 分层记忆系统：session / project / user / global 记忆 + MemPalace PoC")
+        if "security_scan" in tool_name_set or (repo_root / "security" / "security_pipeline.py").exists():
+            evolution_capabilities.append("Phase 5 安全验证与质量门：security review pipeline / quality gate")
+        if tool_name_set & {"spawn_agent", "spawn_agents_parallel", "agent_status"}:
+            evolution_capabilities.append("Phase 6 多 Agent 协作：协调、派发、并行执行与状态汇总")
+        if self._hook_manager and self._hook_manager.list_hooks():
+            evolution_capabilities.append("Phase 7 Hook 自动化：会话、工具、压缩与错误生命周期 hooks")
+        if self._reflection_loop is not None and self._runtime_metrics is not None and self._trace_store is not None:
+            evolution_capabilities.append("Phase 8 反思、指标与评测基础设施：reflection、runtime metrics、trace / eval sample")
+        if (repo_root / "evals" / "quality_program.py").exists():
+            evolution_capabilities.append("Phase 9 质量计划运营层：benchmark runner、report store、quality_program")
+        if (repo_root / "knowledge" / "self_improver.py").exists():
+            evolution_capabilities.append("自我进化：能力缺口分析、外部知识吸收、技能蒸馏与自动注册")
+
+        lines = ["当前可用能力摘要（动态生成，不是固定清单）："]
+        lines.extend(self._format_capability_section("1) 当前已启用能力", enabled_capabilities))
+        lines.extend(self._format_capability_section("2) 已实现但默认未启用的能力", disabled_capabilities))
+        lines.extend(self._format_capability_section("3) 按进化路线形成的系统级能力（不等于当前会话全部已启用）", evolution_capabilities))
+        lines.extend([
+            "4) 底层运行时清单：",
             f"- 工具数量: {len(tool_names)}",
             f"- 工具集: {', '.join(toolsets) if toolsets else '无'}",
             f"- 工具名: {', '.join(tool_names) if tool_names else '无'}",
             f"- 技能数量: {len(skill_names)}",
             f"- 技能名: {', '.join(skill_names) if skill_names else '无'}",
-            "- 当用户询问“你有什么能力/你能做什么”时，应优先依据这份动态摘要回答，而不是复述固定模板。",
-        ]
+            "- 当用户询问“你有什么能力/你能做什么”时，应先回答当前已启用能力，再说明哪些能力是系统已实现但默认未开启，最后补充进化路线上的系统级能力，避免把阶段成果误说成当前全部已启用。",
+        ])
         return "\n".join(lines)
 
     def _build_system_prompt_with_capabilities(self) -> str:

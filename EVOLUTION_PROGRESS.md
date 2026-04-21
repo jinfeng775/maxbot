@@ -78,7 +78,7 @@ Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 
   - [x] `code-analysis`
 - [x] Planner / Security Reviewer 两个预定义 Agent 已与技能体系形成联动基础
 - [x] 默认运行时技能加载已补齐：repo 内置核心技能会与 `~/.maxbot/skills` 用户技能目录一同加载
-- [x] Phase 2 运行时技能加载专项回归测试已补齐
+- [x] Phase 2 运行时技能加载与动态能力摘要专项回归测试已补齐
 
 ### 关键代码位置
 
@@ -100,7 +100,7 @@ Phase 12: ░░░░░░░░░░░░░░░░░░░░   0% ⏳ 
 ### 备注
 
 - `tests/test_phase2.py` 仍主要覆盖代码编辑 / 分析工具链，是 sanity check
-- `tests/test_phase2_skill_runtime.py` 则补上了默认技能目录、repo 内置技能加载、Agent prompt 注入三项运行时验收
+- `tests/test_phase2_skill_runtime.py` 则补上了默认技能目录、repo 内置技能加载、Agent prompt 注入与动态能力摘要四项运行时验收
 - 后续若要继续提高阶段可追踪性，可再追加更完整的 skill-system acceptance suite
 
 ---
@@ -415,7 +415,7 @@ python3 -m pytest \
 ### 测试核验
 
 - `python3 -m pytest tests/test_phase2.py -q` → `29 passed`
-- `python3 -m pytest tests/test_phase2_skill_runtime.py -q` → `3 passed`
+- `python3 -m pytest tests/test_phase2_skill_runtime.py -q` → `12 passed`
 - Phase 3 回归测试集 → `39 passed`
 - `python3 -m pytest tests/test_phase5_security_review_system.py tests/test_phase5_security_pipeline.py tests/test_phase5_quality_gate.py tests/test_phase5_security_tool.py -q` → `11 passed`
 - `python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`

@@ -74,6 +74,181 @@ def test_agent_default_skill_path_injects_builtin_skill_content(monkeypatch, tmp
     assert "tdd-workflow" in prompt
 
 
+def test_agent_dynamic_capability_summary_does_not_overclaim_sparse_enabled_tools(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="read_file",
+        description="读取文件",
+        parameters={"path": {"type": "string"}},
+        handler=lambda path: path,
+        toolset="file",
+        required_params=["path"],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=False,
+            eval_samples_enabled=False,
+            metrics_enabled=False,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "文件操作" in summary
+    assert "代码编辑" not in summary
+    assert "命令执行" not in summary
+    assert "Git" not in summary
+    assert "项目分析" not in summary
+
+
+def test_agent_dynamic_capability_summary_describes_partial_web_capabilities_precisely(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="web_search",
+        description="搜索网页",
+        parameters={"query": {"type": "string"}},
+        handler=lambda query: query,
+        toolset="web",
+        required_params=["query"],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=False,
+            eval_samples_enabled=False,
+            metrics_enabled=False,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "外部检索：网页搜索" in summary
+    assert "外部检索：内容抓取" not in summary
+
+
+def test_agent_dynamic_capability_summary_describes_partial_multi_agent_capabilities_precisely(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="agent_status",
+        description="查看子 Agent 状态",
+        parameters={},
+        handler=lambda: "ok",
+        toolset="multi_agent",
+        required_params=[],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=False,
+            eval_samples_enabled=False,
+            metrics_enabled=False,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "多 Agent 协作：状态汇总" in summary
+    assert "多 Agent 协作：任务派发" not in summary
+    assert "多 Agent 协作：并行执行" not in summary
+
+
+def test_agent_dynamic_capability_summary_marks_phase_capabilities_as_system_level(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="read_file",
+        description="读取文件",
+        parameters={"path": {"type": "string"}},
+        handler=lambda path: path,
+        toolset="file",
+        required_params=["path"],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=False,
+            eval_samples_enabled=False,
+            metrics_enabled=False,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "按进化路线形成的系统级能力" in summary
+    assert "不等于当前会话全部已启用" in summary
+
+
+def test_agent_dynamic_capability_summary_lists_enabled_optional_features_when_turned_on(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="read_file",
+        description="读取文件",
+        parameters={"path": {"type": "string"}},
+        handler=lambda path: path,
+        toolset="file",
+        required_params=["path"],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=True,
+            reflection_enabled=True,
+            mempalace_enabled=True,
+            eval_samples_enabled=True,
+            metrics_enabled=True,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "Reflection：当前会话已启用" in summary
+    assert "MemPalace：当前会话已启用" in summary
+    assert "Eval Samples：当前会话已启用" in summary
+
+
 def test_agent_dynamic_capability_summary_groups_enabled_disabled_and_phase_capabilities(monkeypatch, tmp_path):
     _patch_home(monkeypatch, tmp_path)
     monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
@@ -115,7 +290,7 @@ def test_agent_dynamic_capability_summary_groups_enabled_disabled_and_phase_capa
 
     assert "当前已启用能力" in summary
     assert "已实现但默认未启用的能力" in summary
-    assert "按进化路线形成的高阶能力" in summary
+    assert "按进化路线形成的系统级能力" in summary
     assert "多 Agent 协作" in summary
     assert "Reflection" in summary
     assert "MemPalace" in summary

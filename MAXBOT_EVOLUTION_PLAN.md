@@ -62,11 +62,11 @@
 - ✅ 4 个核心技能目录与 `SKILL.md`
 - ✅ Planner / Security Reviewer 预定义 Agent
 - ✅ repo 内置技能与 `~/.maxbot/skills` 用户技能目录双源加载
-- ✅ Agent prompt 技能注入运行时回归测试：`tests/test_phase2_skill_runtime.py`
+- ✅ Agent prompt 技能注入与动态能力摘要运行时回归测试：`tests/test_phase2_skill_runtime.py`
 
 **验证说明：**
 - `tests/test_phase2.py` = tooling sanity check
-- `tests/test_phase2_skill_runtime.py` = 默认技能目录 / repo 内置技能加载 / prompt 注入专项回归
+- `tests/test_phase2_skill_runtime.py` = 默认技能目录 / repo 内置技能加载 / prompt 注入 / 动态能力摘要专项回归
 
 ---
 
