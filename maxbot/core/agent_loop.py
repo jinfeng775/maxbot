@@ -1011,12 +1011,23 @@ class Agent:
         """获取增强的系统提示（包含技能内容）"""
         base_prompt = self._build_system_prompt_with_capabilities()
 
-        if not self._skill_manager and not self.config.memory_enabled:
+        if (
+            not self._skill_manager
+            and not self.config.memory_enabled
+            and not self.config.mempalace_enabled
+            and not self._is_session_recall_query(user_message)
+        ):
             return base_prompt
 
         try:
             sections: list[str] = []
             self._last_memory_context_hit = False
+
+            session_context = self._build_session_recall_context(user_message)
+            if session_context:
+                logger.info(f"注入会话历史内容: {len(session_context)} 字符")
+                sections.append(f"相关会话历史:\n\n{session_context}")
+                self._last_memory_context_hit = True
 
             if self.config.memory_enabled and self.memory is not None:
                 memory_context = self._build_memory_context()
@@ -1024,6 +1035,12 @@ class Agent:
                     logger.info(f"注入记忆内容: {len(memory_context)} 字符")
                     sections.append(f"相关记忆:\n\n{memory_context}")
                     self._last_memory_context_hit = True
+
+            external_memory_context = self._build_external_memory_context(user_message)
+            if external_memory_context:
+                logger.info(f"注入外部记忆宫殿内容: {len(external_memory_context)} 字符")
+                sections.append(f"外部记忆宫殿召回:\n\n{external_memory_context}")
+                self._last_memory_context_hit = True
 
             if self._skill_manager:
                 # 获取匹配的技能内容
@@ -1044,8 +1061,61 @@ class Agent:
             logger.warning(f"获取技能内容失败: {e}")
             return base_prompt
 
+    @staticmethod
+    def _is_session_recall_query(user_message: str | None) -> bool:
+        text = (user_message or "").strip().lower()
+        if not text:
+            return False
+
+        keywords = [
+            "上次聊到哪",
+            "之前聊到哪",
+            "上一轮",
+            "刚才说到哪",
+            "会话历史",
+            "聊天记录",
+            "历史记录",
+            "session history",
+            "previous conversation",
+            "what did we discuss",
+            "last time",
+        ]
+        return any(keyword in text for keyword in keywords)
+
+    def _build_session_recall_context(self, user_message: str | None = None) -> str:
+        if not self._is_session_recall_query(user_message):
+            return ""
+        if not self.config.session_store or not self.config.session_id:
+            return ""
+
+        session = self.config.session_store.get(self.config.session_id)
+        if not session or not session.messages:
+            return ""
+
+        lines = [
+            "# SessionStore 会话历史",
+            "说明：以下内容来自 SessionStore，是当前会话的权威历史记录。",
+            "若外部记忆宫殿与会话历史冲突，以 SessionStore 为准。",
+        ]
+        if session.title:
+            lines.append(f"标题: {session.title}")
+
+        for message in session.messages[-8:]:
+            role = message.get("role", "unknown") if isinstance(message, dict) else getattr(message, "role", "unknown")
+            content = message.get("content", "") if isinstance(message, dict) else getattr(message, "content", "")
+            content = (content or "").strip()
+            if not content:
+                continue
+            lines.append(f"- [{role}] {content}")
+
+        combined = "\n".join(lines)
+        max_chars = self.config.skill_injection_max_chars
+        if max_chars and len(combined) > max_chars:
+            combined = combined[:max_chars].rstrip()
+        return combined
+
     def _build_memory_context(self) -> str:
-        if self.memory is None and not self.config.mempalace_enabled:
+        if self.memory is None:
             return ""
         session_meta = self._build_session_metadata(self.config.session_store.get(self.config.session_id) if self.config.session_id and self.config.session_store else None)
         session_id = self.config.session_id
@@ -1083,10 +1153,6 @@ class Agent:
                     continue
                 sections.append(f"## {scope_name}\n" + "\n".join(kept_lines))
 
-        mempalace_text = self._build_mempalace_context(project_id=project_id)
-        if mempalace_text:
-            sections.append(f"## mempalace\n{mempalace_text}")
-
         if not sections:
             return ""
 
@@ -1096,7 +1162,30 @@ class Agent:
             combined = combined[:max_chars].rstrip()
         return combined
 
-    def _build_mempalace_context(self, project_id: str | None = None) -> str:
+    def _build_external_memory_context(self, user_message: str | None = None) -> str:
+        if not self.config.mempalace_enabled:
+            return ""
+
+        session_meta = self._build_session_metadata(self.config.session_store.get(self.config.session_id) if self.config.session_id and self.config.session_store else None)
+        project_id = session_meta.get("project_id")
+        mempalace_text = self._build_mempalace_context(user_message=user_message, project_id=project_id)
+        if not mempalace_text:
+            return ""
+
+        lines = [
+            "说明：以下内容来自外部记忆宫殿召回，不是当前会话逐字记录，不能替代 SessionStore 会话历史。",
+        ]
+        if self._is_session_recall_query(user_message):
+            lines.append("若外部记忆宫殿与会话历史冲突，以 SessionStore 为准。")
+        lines.append(mempalace_text)
+
+        combined = "\n".join(lines)
+        max_chars = self.config.skill_injection_max_chars
+        if max_chars and len(combined) > max_chars:
+            combined = combined[:max_chars].rstrip()
+        return combined
+
+    def _build_mempalace_context(self, user_message: str | None = None, project_id: str | None = None) -> str:
         if not self.config.mempalace_enabled:
             return ""
 
@@ -1111,11 +1200,12 @@ class Agent:
         if wakeup:
             parts.append(wakeup)
 
-        query = ""
-        for message in reversed(self.messages):
-            if message.role == "user" and message.content.strip():
-                query = message.content.strip()
-                break
+        query = (user_message or "").strip()
+        if not query:
+            for message in reversed(self.messages):
+                if message.role == "user" and message.content.strip():
+                    query = message.content.strip()
+                    break
 
         if query:
             for entry in adapter.search(query, wing=wing, limit=5):

@@ -1,9 +1,11 @@
 from __future__ import annotations
 
 import hashlib
+import json
 import os
 import shutil
 import subprocess
+import tempfile
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -76,6 +78,30 @@ class MemPalaceAdapter:
             return ""
         return result.stdout.strip()
 
+    def _store_session_via_cli_mine(
+        self,
+        messages: list[dict[str, Any]],
+        session_id: str,
+        wing: str = "conversations",
+        room: str = "general",
+    ) -> bool:
+        if not self.is_available():
+            return False
+
+        with tempfile.TemporaryDirectory(prefix="mempalace-session-") as tmp:
+            export_dir = Path(tmp)
+            export_file = export_dir / f"{session_id}.jsonl"
+            payload = {
+                "session_id": session_id,
+                "wing": wing,
+                "room": room,
+                "messages": messages,
+            }
+            export_file.write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding="utf-8")
+
+            result = self._run("mine", str(export_dir), "--mode", "convos", "--wing", wing)
+            return result is not None and result.returncode == 0
+
     def store_message(
         self,
         role: str,
@@ -97,7 +123,12 @@ class MemPalaceAdapter:
             True if successful, False otherwise
         """
         if not _MEMPALACE_AVAILABLE:
-            return False
+            return self._store_session_via_cli_mine(
+                [{"role": role, "content": content}],
+                session_id=session_id,
+                wing=wing,
+                room=room,
+            )
 
         try:
             # Create drawer ID from session ID
@@ -168,7 +199,7 @@ class MemPalaceAdapter:
             True if successful, False otherwise
         """
         if not _MEMPALACE_AVAILABLE:
-            return False
+            return self._store_session_via_cli_mine(messages, session_id=session_id, wing=wing, room=room)
 
         try:
             # Create drawer ID from session ID

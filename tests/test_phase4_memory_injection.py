@@ -17,7 +17,13 @@ def _make_agent_with_memory(monkeypatch, tmp_path, *, session_id="s1", project_i
     monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
     memory = Memory(path=tmp_path / "memory.db")
     agent = Agent(config=config, memory=memory)
-    agent.messages = [Message(role="user", content="hello", metadata={k: v for k, v in {"project_id": project_id, "user_id": user_id}.items() if v})]
+    metadata = {k: v for k, v in {"project_id": project_id, "user_id": user_id}.items() if v}
+    agent.messages = [Message(role="user", content="hello", metadata=metadata)]
+    if metadata and agent.config.session_store and session_id:
+        session = agent.config.session_store.get(session_id)
+        if session is None:
+            agent.config.session_store.create(session_id, metadata=metadata)
+        agent.config.session_store.save_messages(session_id, [msg.to_dict() for msg in agent.messages], metadata=metadata)
     return agent, memory
 
 
