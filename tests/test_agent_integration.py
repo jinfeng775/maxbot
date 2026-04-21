@@ -398,3 +398,67 @@ class TestSessionPersistence:
             session = store.get("title-test")
             assert session is not None
             assert "Python" in session.title
+
+    def test_new_session_rotates_session_id_without_deleting_old_session(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+
+            config = AgentConfig(
+                api_key="test-key",
+                memory_enabled=False,
+                session_id="persist-session-1",
+                auto_save=True,
+                skills_enabled=False,
+            )
+            agent = Agent(config=config, session_store=store)
+            agent.messages = [
+                Message(role="user", content="第一轮消息"),
+                Message(role="assistant", content="第一轮回复"),
+            ]
+            assert agent.save_session() is True
+
+            old_session_id = agent.config.session_id
+            assert store.get(old_session_id) is not None
+
+            agent.new_session()
+
+            assert agent.config.session_id != old_session_id
+            assert agent.get_messages() == []
+            assert agent._conversation_turns == 0
+            assert store.get(old_session_id) is not None
+
+    def test_reset_clears_runtime_messages_but_keeps_session_history(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+
+            config = AgentConfig(
+                api_key="test-key",
+                memory_enabled=False,
+                session_id="persist-session-2",
+                auto_save=True,
+                skills_enabled=False,
+            )
+            agent = Agent(config=config, session_store=store)
+            agent.messages = [
+                Message(role="user", content="保留历史"),
+                Message(role="assistant", content="不要删除我"),
+            ]
+            agent._conversation_turns = 5
+            assert agent.save_session() is True
+
+            current_session_id = agent.config.session_id
+            saved_before_reset = store.get(current_session_id)
+            assert saved_before_reset is not None
+            assert len(saved_before_reset.messages) == 2
+
+            agent.reset()
+
+            assert agent.config.session_id == current_session_id
+            assert agent.get_messages() == []
+            assert agent._conversation_turns == 0
+
+            saved_after_reset = store.get(current_session_id)
+            assert saved_after_reset is not None
+            assert len(saved_after_reset.messages) == 2

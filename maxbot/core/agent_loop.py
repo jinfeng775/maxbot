@@ -11,6 +11,7 @@ from __future__ import annotations
 import json
 import os
 import time
+import uuid
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable
@@ -1313,6 +1314,52 @@ class Agent:
         finally:
             self.config.auto_save = original_auto_save
 
+    def _generate_session_id(self) -> str:
+        now = time.strftime("%Y%m%d_%H%M%S")
+        short_uuid = uuid.uuid4().hex[:8]
+        return f"{now}_{short_uuid}"
+
+    def _archive_session_to_mempalace(self, session_id: str, messages: list[dict[str, Any]]) -> bool:
+        if not self.config.mempalace_enabled or not session_id or not messages:
+            return False
+
+        try:
+            adapter = MemPalaceAdapter(self.config.mempalace_path)
+            if not adapter.is_available():
+                return False
+
+            existing = self.config.session_store.get(session_id) if self.config.session_store else None
+            metadata = self._build_session_metadata(existing)
+            wing = self.config.mempalace_wing or metadata.get("project_id", "conversations")
+            room = metadata.get("user_id", "general")
+            return bool(adapter.store_session(messages, session_id, wing=wing, room=room))
+        except Exception as e:
+            logger.warning(f"会话边界归档到 MemPalace 失败: {e}")
+            return False
+
+    def new_session(self) -> str:
+        """像 Hermes 一样开启一个新的 session_id，保留旧会话历史。"""
+        old_session_id = self.config.session_id
+        old_messages = [msg.to_dict() for msg in self._message_manager.get_messages()]
+
+        if old_session_id and old_messages:
+            self.save_session()
+            self._archive_session_to_mempalace(old_session_id, old_messages)
+
+        self._trigger_hook(HookEvent.SESSION_END)
+
+        self.config.session_id = self._generate_session_id()
+        self.messages = []
+        self._conversation_turns = 0
+
+        if self.config.auto_save and self.config.session_store and self.config.session_id:
+            existing = self.config.session_store.get(self.config.session_id)
+            if not existing:
+                self.config.session_store.create(self.config.session_id, metadata={})
+
+        logger.info(f"开启新会话: {old_session_id} -> {self.config.session_id}")
+        return self.config.session_id
+
     def list_sessions(self) -> list[dict[str, Any]]:
         if not self.config.session_store:
             return []
@@ -1660,10 +1707,9 @@ class Agent:
         return self._message_manager.get_messages()
 
     def reset(self):
-        """重置对话"""
+        """重置当前上下文，但保留当前 session 历史。"""
         logger.info(f"重置对话: {self.config.session_id}")
         self.messages = []
         self._conversation_turns = 0
-        if self.config.session_id:
-            self.config.session_store.delete(self.config.session_id)
+        self._trigger_hook(HookEvent.SESSION_END)
         logger.debug("对话重置完成")

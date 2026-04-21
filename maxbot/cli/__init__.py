@@ -116,13 +116,14 @@ def main():
             continue
 
         if user_input == "/new":
-            agent.reset()
-            print("  ✨ 新会话已开启\n")
+            old_session_id = agent.config.session_id
+            new_session_id = agent.new_session()
+            print(f"  ✨ 新会话已开启（旧会话 {old_session_id} 已保留，当前会话 {new_session_id}）\n")
             continue
 
         if user_input == "/reset":
             agent.reset()
-            print("  🔄 对话已重置\n")
+            print("  🔄 当前上下文已重置（会话历史仍保留）\n")
             continue
 
         if user_input == "/stats":

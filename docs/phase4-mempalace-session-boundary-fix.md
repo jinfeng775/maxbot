@@ -71,6 +71,23 @@
 
 ## 本次实现要点
 
+### `/new` / `/reset` 会话边界修复（对齐 Hermes）
+
+现在 MaxBot 的 CLI 会话边界语义改成：
+
+- `/new`
+  - 先保存当前 session 到 `SessionStore`
+  - 再把当前 session 归档到 `MemPalace`
+  - 然后生成新的 `session_id`
+  - 清空当前上下文
+  - **旧会话不删除**
+- `/reset`
+  - 只清空当前运行时上下文
+  - 保留当前 `session_id`
+  - 保留 `SessionStore` 中的会话历史
+
+这与 Hermes 的“fresh session ID + preserve history”语义对齐，而不是过去那种 `/new` 直接删除当前 session 的行为。
+
 ### Prompt 路由修复
 
 `maxbot/core/agent_loop.py`

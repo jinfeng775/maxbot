@@ -164,3 +164,44 @@ def test_agent_save_session_uses_mempalace_cli_fallback(monkeypatch, tmp_path):
     assert captured["wing"] == "proj-a"
     assert captured["room"] == "u1"
     assert captured["messages"][0]["content"] == "继续排查"
+
+
+
+def test_new_session_archives_previous_session_to_mempalace(monkeypatch, tmp_path):
+    archived = {}
+
+    def fake_store_session(self, messages, session_id, wing="conversations", room="general"):
+        archived["messages"] = messages
+        archived["session_id"] = session_id
+        archived["wing"] = wing
+        archived["room"] = room
+        return True
+
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+    monkeypatch.setattr(MemPalaceAdapter, "is_available", lambda self: True)
+    monkeypatch.setattr(MemPalaceAdapter, "store_session", fake_store_session)
+
+    config = AgentConfig(
+        api_key="test-key",
+        memory_enabled=True,
+        mempalace_enabled=True,
+        mempalace_path=str(tmp_path / "palace"),
+        session_id="old-session",
+        auto_save=True,
+        system_prompt="你是 MaxBot",
+        skills_enabled=False,
+    )
+    agent = Agent(config=config)
+    agent.messages = [
+        Message(role="user", content="旧会话消息", metadata={"project_id": "proj-a", "user_id": "u1"}),
+        Message(role="assistant", content="旧会话回复"),
+    ]
+
+    previous_session_id = agent.config.session_id
+    agent.new_session()
+
+    assert archived["session_id"] == previous_session_id
+    assert archived["wing"] == "proj-a"
+    assert archived["room"] == "u1"
+    assert archived["messages"][0]["content"] == "旧会话消息"
+    assert agent.config.session_id != previous_session_id
