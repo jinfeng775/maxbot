@@ -463,6 +463,49 @@ class TestSessionPersistence:
             assert saved_after_reset is not None
             assert len(saved_after_reset.messages) == 2
 
+    def test_resume_session_accepts_recent_session_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+            store.create("older-session", title="较早会话")
+            store.save_messages("older-session", [{"role": "user", "content": "旧消息"}])
+            store.create("newer-session", title="较新会话")
+            store.save_messages("newer-session", [{"role": "user", "content": "新消息"}])
+
+            config = AgentConfig(
+                api_key="test-key",
+                memory_enabled=False,
+                session_id="active-session",
+                auto_save=True,
+                skills_enabled=False,
+            )
+            agent = Agent(config=config, session_store=store)
+            agent.messages = [Message(role="user", content="当前消息")]
+
+            assert agent.resume_session("1") is True
+            assert agent.config.session_id == "newer-session"
+            assert len(agent.get_messages()) == 1
+            assert agent.get_messages()[0].content == "新消息"
+
+    def test_resume_session_rejects_out_of_range_index(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            db = str(Path(tmp) / "sessions.db")
+            store = SessionStore(path=db)
+            store.create("only-session", title="唯一会话")
+            store.save_messages("only-session", [{"role": "user", "content": "唯一消息"}])
+
+            config = AgentConfig(
+                api_key="test-key",
+                memory_enabled=False,
+                session_id="active-session",
+                auto_save=True,
+                skills_enabled=False,
+            )
+            agent = Agent(config=config, session_store=store)
+
+            assert agent.resume_session("2") is False
+            assert agent.config.session_id == "active-session"
+
     def test_resume_session_loads_previous_messages(self):
         with tempfile.TemporaryDirectory() as tmp:
             db = str(Path(tmp) / "sessions.db")

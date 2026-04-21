@@ -124,7 +124,7 @@ def main():
     /new                   开启新会话
     /reset                 重置当前上下文（保留历史）
     /sessions              列出历史会话
-    /resume [id]           恢复指定历史会话；无参数时列出最近会话
+    /resume [id|编号]      恢复指定历史会话；无参数时列出最近会话
     /delete_session <id>   删除指定历史会话
     /tools                 列出所有可用工具
     /stats                 显示会话统计
@@ -170,7 +170,7 @@ def main():
                 title = session.get("title") or "(无标题)"
                 updated = _format_session_time(session.get("updated_at"))
                 print(f"    {idx}. {session['session_id']} | {title} | {updated}")
-            print("\n  用法: /resume <session_id>\n")
+            print("\n  用法: /resume <session_id> 或 /resume <编号>\n")
             continue
 
         if user_input.startswith("/resume "):
