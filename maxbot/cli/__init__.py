@@ -1,16 +1,40 @@
-"""MaxBot CLI — 交互式命令行界面"""
+"""CLI 接口"""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
+from datetime import datetime
+
 import sys
 from pathlib import Path
 
 from maxbot import __version__
 from maxbot.core import Agent, AgentConfig
 from maxbot.tools import registry
+
+
+def _format_session_time(ts: float | None) -> str:
+    if ts is None:
+        return "未知时间"
+
+    dt = datetime.fromtimestamp(ts)
+    now = datetime.now()
+    delta = now - dt
+
+    if delta.total_seconds() < 60:
+        return "刚刚"
+    if delta.total_seconds() < 3600:
+        minutes = max(1, int(delta.total_seconds() // 60))
+        return f"{minutes} 分钟前"
+
+    today = now.date()
+    target_day = dt.date()
+    if target_day == today:
+        return f"今天 {dt.strftime('%H:%M')}"
+    if (today - target_day).days == 1:
+        return f"昨天 {dt.strftime('%H:%M')}"
+    return dt.strftime("%Y-%m-%d %H:%M")
 
 
 def load_env_file():
@@ -134,7 +158,8 @@ def main():
             print(f"\n  📚 历史会话 ({len(sessions)} 个):")
             for idx, session in enumerate(sessions[:20], 1):
                 title = session.get("title") or "(无标题)"
-                print(f"    {idx}. {session['session_id']} | {title} | updated={session['updated_at']}")
+                updated = _format_session_time(session.get("updated_at"))
+                print(f"    {idx}. {session['session_id']} | {title} | {updated}")
             print()
             continue
 
@@ -143,7 +168,8 @@ def main():
             print(f"\n  📚 最近会话 ({len(sessions)} 个):")
             for idx, session in enumerate(sessions[:20], 1):
                 title = session.get("title") or "(无标题)"
-                print(f"    {idx}. {session['session_id']} | {title} | updated={session['updated_at']}")
+                updated = _format_session_time(session.get("updated_at"))
+                print(f"    {idx}. {session['session_id']} | {title} | {updated}")
             print("\n  用法: /resume <session_id>\n")
             continue
 

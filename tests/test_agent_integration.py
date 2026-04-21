@@ -530,3 +530,4 @@ class TestSessionPersistence:
             assert all("title" in session for session in sessions)
             assert all("created_at" in session for session in sessions)
             assert all("updated_at" in session for session in sessions)
+            assert all(isinstance(session["updated_at"], float) for session in sessions)
