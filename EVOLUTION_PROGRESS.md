@@ -415,7 +415,7 @@ python3 -m pytest \
 ### 测试核验
 
 - `python3 -m pytest tests/test_phase2.py -q` → `29 passed`
-- `python3 -m pytest tests/test_phase2_skill_runtime.py -q` → `12 passed`
+- `python3 -m pytest tests/test_phase2_skill_runtime.py -q` → `14 passed`
 - Phase 3 回归测试集 → `39 passed`
 - `python3 -m pytest tests/test_phase5_security_review_system.py tests/test_phase5_security_pipeline.py tests/test_phase5_quality_gate.py tests/test_phase5_security_tool.py -q` → `11 passed`
 - `python3 -m pytest tests/test_phase6_multi_agent_completion.py tests/test_phase6_coordinator.py tests/test_phase6_multi_agent_tools.py tests/test_phase6_multi_agent_compat.py tests/test_phase3.py tests/test_multi_agent.py -q` → `43 passed`

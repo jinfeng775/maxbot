@@ -249,6 +249,73 @@ def test_agent_dynamic_capability_summary_lists_enabled_optional_features_when_t
     assert "Eval Samples：当前会话已启用" in summary
 
 
+def test_agent_dynamic_capability_summary_marks_disabled_features_as_current_session_disabled(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="read_file",
+        description="读取文件",
+        parameters={"path": {"type": "string"}},
+        handler=lambda path: path,
+        toolset="file",
+        required_params=["path"],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=False,
+            eval_samples_enabled=False,
+            metrics_enabled=False,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "MemPalace：外接长期记忆 PoC 已接入，但当前会话未启用" in summary
+
+
+def test_agent_dynamic_capability_summary_requires_memory_injection_for_mempalace_enabled_label(monkeypatch, tmp_path):
+    _patch_home(monkeypatch, tmp_path)
+    monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())
+
+    registry = ToolRegistry()
+    registry.register(
+        name="read_file",
+        description="读取文件",
+        parameters={"path": {"type": "string"}},
+        handler=lambda path: path,
+        toolset="file",
+        required_params=["path"],
+    )
+
+    agent = Agent(
+        config=AgentConfig(
+            api_key="test-key",
+            system_prompt="你是 MaxBot",
+            skills_enabled=False,
+            memory_enabled=False,
+            reflection_enabled=False,
+            mempalace_enabled=True,
+            eval_samples_enabled=False,
+            metrics_enabled=False,
+        ),
+        registry=registry,
+    )
+
+    summary = agent._build_capability_summary()
+
+    assert "MemPalace：当前会话已启用" not in summary
+    assert "MemPalace：已接入，但当前记忆注入链路关闭，本会话不会自动注入" in summary
+
+
 def test_agent_dynamic_capability_summary_groups_enabled_disabled_and_phase_capabilities(monkeypatch, tmp_path):
     _patch_home(monkeypatch, tmp_path)
     monkeypatch.setattr(Agent, "_init_client", lambda self: MagicMock())

@@ -936,7 +936,7 @@ class Agent:
                 enabled_capabilities.append("记忆工具：可手动读写 memory，自动记忆注入当前关闭")
         if self.config.reflection_enabled:
             enabled_capabilities.append("Reflection：当前会话已启用 critique / revise 反思闭环")
-        if self.config.mempalace_enabled:
+        if self.config.mempalace_enabled and self.config.memory_enabled:
             enabled_capabilities.append("MemPalace：当前会话已启用外接长期记忆检索与唤醒")
         if self.config.eval_samples_enabled:
             enabled_capabilities.append("Eval Samples：当前会话已启用成功任务评测样本导出")
@@ -951,7 +951,9 @@ class Agent:
         if not self.config.reflection_enabled:
             disabled_capabilities.append("Reflection：已实现 critique / revise 反思闭环，但当前默认未启用")
         if not self.config.mempalace_enabled:
-            disabled_capabilities.append("MemPalace：外接长期记忆 PoC 已接入，但当前默认未启用")
+            disabled_capabilities.append("MemPalace：外接长期记忆 PoC 已接入，但当前会话未启用")
+        elif not self.config.memory_enabled:
+            disabled_capabilities.append("MemPalace：已接入，但当前记忆注入链路关闭，本会话不会自动注入")
         if not self.config.eval_samples_enabled:
             disabled_capabilities.append("Eval Samples：成功任务导出为评测样本的链路已实现，但当前默认未启用")
         if not self.config.memory_enabled:
